@@ -1,14 +1,6 @@
 package com.payledger.notification;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,41 +15,13 @@ import static com.payledger.notification.TestcontainersConfiguration.TOPIC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /** At-least-once delivery in, at-most-once effect out. */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
-class IdempotentConsumerIntegrationTest {
-
-    @Autowired
-    TransferNotifier notifier;
-
-    @Autowired
-    NotificationStore store;
-
-    @Autowired
-    KafkaTemplate<String, String> kafka;
-
-    @Autowired
-    JdbcTemplate jdbc;
-
-    @Autowired
-    JsonMapper json;
-
-    @MockitoSpyBean
-    NotificationSender sender;
-
-    @BeforeEach
-    void resetSender() {
-        clearInvocations(sender);
-    }
+class IdempotentConsumerIntegrationTest extends ConsumerTestSupport {
 
     @Test
     void redeliveredEventIsNotNotifiedAgain() {
@@ -100,7 +64,8 @@ class IdempotentConsumerIntegrationTest {
     @Test
     void failedSendRollsBackTheMarkerSoTheRetryStillNotifies() {
         TransferEvent event = completedTransfer();
-        doThrow(new IllegalStateException("SMS gateway timed out")).doCallRealMethod().when(sender).send(any());
+        doThrow(new IllegalStateException("SMS gateway timed out")).doCallRealMethod()
+                .when(sender).send(argThat(n -> n.eventId().equals(event.id())));
 
         assertThatThrownBy(() -> notifier.handle(event)).hasMessage("SMS gateway timed out");
         assertThat(store.findByEvent(event.id())).isEmpty();
@@ -109,7 +74,6 @@ class IdempotentConsumerIntegrationTest {
         assertThat(notifier.handle(event)).hasSize(2);
         assertThat(store.findByEvent(event.id())).hasSize(2);
         assertThat(processedCount(event.id())).isOne();
-        doCallRealMethod().when(sender).send(any());
     }
 
     @Test

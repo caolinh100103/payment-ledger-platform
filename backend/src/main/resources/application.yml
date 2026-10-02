@@ -39,6 +39,11 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+logging:
+  level:
+    # OutboxRelay reports failed sends itself: one line per batch, without event payloads (personal data).
+    org.springframework.kafka.support.LoggingProducerListener: "off"
+
 management:
   endpoints:
     web:

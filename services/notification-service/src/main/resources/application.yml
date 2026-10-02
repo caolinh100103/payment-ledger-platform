@@ -35,3 +35,7 @@ management:
 payledger:
   notification:
     topic: payledger.transfers
+  processed-events:
+    # Must exceed the topic's retention (7 days by default): an event can be redelivered while Kafka still has it.
+    retention: 14d
+    cleanup-interval: PT1H

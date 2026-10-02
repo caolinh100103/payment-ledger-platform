@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: payledger-core
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:15432/payledger}
+    username: ${DB_USERNAME:payledger}
+    password: ${DB_PASSWORD:payledger}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Flyway; Hibernate only checks that entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}

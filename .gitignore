@@ -1,0 +1,19 @@
+# Build output
+target/
+build/
+dist/
+node_modules/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+*.local

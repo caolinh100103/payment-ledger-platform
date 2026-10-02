@@ -12,7 +12,7 @@ import java.util.UUID;
  * The write side of the transactional outbox (ADR 0003). Publishing to Kafka directly from a business
  * transaction is a dual write: a crash between the database commit and the send loses the event, and a send
  * followed by a rollback announces something that never happened. Instead, the event is inserted into the
- * {@code outbox} table by the transaction that makes the change, and a relay publishes it afterwards.
+ * {@code outbox} table by the transaction that makes the change, and {@link OutboxRelay} publishes it afterwards.
  */
 @Repository
 public class Outbox {

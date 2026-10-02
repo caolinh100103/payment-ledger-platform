@@ -15,7 +15,7 @@ consumers ([audit-service](../services/audit-service), [notification-service](..
 | Ordering | Guaranteed per transfer, not across transfers. |
 
 Events are written to an outbox table in the same database transaction as the change they describe, then
-relayed to Kafka ([ADR 0003](adr/0003-synchronous-ledger-with-outbox.md), [ADR 0007](adr/0007-outbox-relay.md)).
+relayed to Kafka ([ADR 0003](adr/0003-synchronous-ledger-with-outbox.md), [ADR 0007](adr/0007-polling-outbox-relay.md)).
 An event is published if and only if its change committed.
 
 ## Envelope

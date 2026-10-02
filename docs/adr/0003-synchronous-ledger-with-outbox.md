@@ -17,7 +17,7 @@ Two failure modes threaten correctness:
   transaction**, with the involved account rows locked (`SELECT ... FOR UPDATE`, in ascending id order
   to avoid deadlocks).
 - Domain events are inserted into an `outbox` table **in that same transaction**. A relay publishes
-  outbox rows to Kafka and marks them as sent.
+  outbox rows to Kafka and marks them as sent ([ADR 0007](0007-polling-outbox-relay.md)).
 
 ## Consequences
 

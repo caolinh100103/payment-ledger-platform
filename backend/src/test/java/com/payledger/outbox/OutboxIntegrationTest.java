@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -21,6 +22,9 @@ class OutboxIntegrationTest extends ApiTestSupport {
 
     @Autowired
     TransactionTemplate tx;
+
+    @Autowired
+    OutboxCleanup cleanup;
 
     @Test
     void storesTheEnvelopeAsPendingForTheRelay() {
@@ -69,6 +73,27 @@ class OutboxIntegrationTest extends ApiTestSupport {
 
         assertThatThrownBy(() -> outbox.append("test.topic", "test", aggregateId, sampleEvent(aggregateId)))
                 .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void cleanupDeletesOnlyEventsPublishedBeforeTheRetentionWindow() {
+        UUID oldPublished = UUID.randomUUID();
+        UUID recentPublished = UUID.randomUUID();
+        UUID oldPending = UUID.randomUUID();
+        tx.executeWithoutResult(status -> {
+            for (UUID id : List.of(oldPublished, recentPublished, oldPending)) {
+                outbox.append("test.topic", "test", id, sampleEvent(id));
+            }
+        });
+        jdbc.update("UPDATE outbox SET published_at = now() - interval '8 days' WHERE aggregate_id = ?", oldPublished);
+        jdbc.update("UPDATE outbox SET published_at = now() - interval '1 day' WHERE aggregate_id = ?", recentPublished);
+        // Never published, e.g. stuck behind a broken topic: kept however old, so it is never lost.
+        jdbc.update("UPDATE outbox SET created_at = now() - interval '30 days' WHERE aggregate_id = ?", oldPending);
+
+        cleanup.deletePublishedEvents();
+
+        assertThat(jdbc.queryForList("SELECT aggregate_id FROM outbox WHERE aggregate_id IN (?, ?, ?)", UUID.class,
+                oldPublished, recentPublished, oldPending)).containsExactlyInAnyOrder(recentPublished, oldPending);
     }
 
     private static CloudEvent<Map<String, Object>> sampleEvent(UUID aggregateId) {

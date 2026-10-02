@@ -31,7 +31,7 @@ class TransferApiIntegrationTest extends ApiTestSupport {
         assertThat(result).hasStatus(HttpStatus.CREATED);
         assertThat(result).bodyJson().extractingPath("$.type").isEqualTo("TRANSFER");
         assertThat(result).bodyJson().extractingPath("$.status").isEqualTo("COMPLETED");
-        assertThat(result).bodyJson().extractingPath("$.description").isEqualTo("Tien nha thang 10");
+        assertThat(result).bodyJson().extractingPath("$.description").isEqualTo("Tiền nhà tháng 10");
         assertThat(balanceOf(alice)).isEqualTo(750_000);
         assertThat(balanceOf(bob)).isEqualTo(250_000);
 
@@ -159,15 +159,5 @@ class TransferApiIntegrationTest extends ApiTestSupport {
         assertThat(balanceOf(alice)).isEqualTo(100_000);
 
         assertThat(transfer(alice, bob, 1_000, "VND")).hasStatus(HttpStatus.CREATED);
-    }
-
-    private MvcTestResult transfer(String from, String to, long amount, String currency) {
-        return mvc.post().uri("/api/v1/transfers")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"sourceAccountId": "%s", "destinationAccountId": "%s", "amount": %d,
-                         "currency": "%s", "description": "Tien nha thang 10"}
-                        """.formatted(from, to, amount, currency))
-                .exchange();
     }
 }

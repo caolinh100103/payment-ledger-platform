@@ -135,11 +135,15 @@ CREATE TABLE idempotency_keys (
     scope            VARCHAR(64)   NOT NULL,
     idempotency_key  VARCHAR(255)  NOT NULL,
     -- SHA-256 of method + path + body: the same key with a different request is rejected.
-    request_hash     CHAR(64)      NOT NULL,
+    request_hash     VARCHAR(64)   NOT NULL,
     status           VARCHAR(16)   NOT NULL,
     response_status  INT,
     -- Stored verbatim so a replay is byte-for-byte identical to the original response.
     response_body    TEXT,
+    response_location VARCHAR(512),
+    -- Identifies the request that currently owns the key. The business transaction only commits if it
+    -- still owns the key, so a request whose lease was taken over can never complete a second execution.
+    lock_token       UUID          NOT NULL,
     -- While PROCESSING: after this instant the owner is presumed dead and another request may take over.
     locked_until     TIMESTAMPTZ,
     created_at       TIMESTAMPTZ   NOT NULL,

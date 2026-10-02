@@ -41,12 +41,32 @@ public abstract class ApiTestSupport {
     }
 
     protected MvcTestResult deposit(String accountId, long amount, String currency) {
-        return mvc.post().uri("/api/v1/deposits")
+        return postWithKey("/api/v1/deposits", UUID.randomUUID().toString(), """
+                {"accountId": "%s", "amount": %d, "currency": "%s", "description": "Top-up"}
+                """.formatted(accountId, amount, currency));
+    }
+
+    protected MvcTestResult transfer(String from, String to, long amount, String currency) {
+        return postWithKey("/api/v1/transfers", UUID.randomUUID().toString(), transferBody(from, to, amount, currency));
+    }
+
+    protected static String transferBody(String from, String to, long amount, String currency) {
+        return """
+                {"sourceAccountId": "%s", "destinationAccountId": "%s", "amount": %d,
+                 "currency": "%s", "description": "Tiền nhà tháng 10"}
+                """.formatted(from, to, amount, currency);
+    }
+
+    protected MvcTestResult postWithKey(String uri, String idempotencyKey, String json) {
+        return mvc.post().uri(uri)
+                .header("Idempotency-Key", idempotencyKey)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"accountId": "%s", "amount": %d, "currency": "%s", "description": "Top-up"}
-                        """.formatted(accountId, amount, currency))
+                .content(json)
                 .exchange();
+    }
+
+    protected static String bodyOf(MvcTestResult result) {
+        return new String(result.getMvcResult().getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
     }
 
     protected String fundedAccount(String currency, long amount) {
@@ -70,7 +90,6 @@ public abstract class ApiTestSupport {
     }
 
     protected static <T> T jsonPath(MvcTestResult result, String path) {
-        byte[] body = result.getMvcResult().getResponse().getContentAsByteArray();
-        return JsonPath.read(new String(body, StandardCharsets.UTF_8), path);
+        return JsonPath.read(bodyOf(result), path);
     }
 }

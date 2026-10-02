@@ -1,5 +1,7 @@
 package com.payledger.transfer;
 
+import com.payledger.common.idempotency.IdempotencyHandler;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,21 +24,26 @@ import java.util.UUID;
 public class TransferController {
 
     private final TransferService transferService;
+    private final IdempotencyHandler idempotency;
 
-    public TransferController(TransferService transferService) {
+    public TransferController(TransferService transferService, IdempotencyHandler idempotency) {
         this.transferService = transferService;
+        this.idempotency = idempotency;
     }
 
     /**
      * 201 with the COMPLETED transfer, or 422 with a stable {@code code} (e.g. INSUFFICIENT_FUNDS) when a
      * business rule rejects it; the rejected attempt is still recorded and returned as {@code transferId}.
+     * Requires an {@code Idempotency-Key}: retrying with the same key returns the original outcome.
      */
     // Temporary: the caller may debit any account until JWT auth (Phase 4) checks ownership of the source.
     @PostMapping
-    public ResponseEntity<Object> create(@Valid @RequestBody CreateTransferRequest request) {
-        Transfer transfer = transferService.transfer(request.sourceAccountId(), request.destinationAccountId(),
-                request.amount(), request.currency(), request.description());
-        return TransferOutcomes.toResponse(transfer);
+    public ResponseEntity<String> create(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
+                                         @Valid @RequestBody CreateTransferRequest request,
+                                         HttpServletRequest http) {
+        return idempotency.execute(key, http, request, () -> TransferOutcomes.toResponse(
+                transferService.transfer(request.sourceAccountId(), request.destinationAccountId(),
+                        request.amount(), request.currency(), request.description())));
     }
 
     @GetMapping("/{id}")

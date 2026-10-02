@@ -1,5 +1,6 @@
 package com.payledger.common.error;
 
+import com.payledger.common.idempotency.IdempotencyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
@@ -29,6 +30,17 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
         problem.setProperty("code", ex.getCode());
         return problem;
+    }
+
+    @ExceptionHandler(IdempotencyException.class)
+    ResponseEntity<ProblemDetail> handleIdempotency(IdempotencyException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        problem.setProperty("code", ex.getCode());
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(ex.getStatus());
+        if (ex.getStatus() == HttpStatus.CONFLICT) {
+            response.header(HttpHeaders.RETRY_AFTER, "1");
+        }
+        return response.body(problem);
     }
 
     /**

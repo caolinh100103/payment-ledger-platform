@@ -32,6 +32,7 @@ class AccountApiIntegrationTest {
         assertThat(created).hasStatus(HttpStatus.CREATED);
         assertThat(created).headers().containsHeader("Location");
         assertThat(created).bodyJson().extractingPath("$.status").isEqualTo("ACTIVE");
+        assertThat(created).bodyJson().extractingPath("$.type").isEqualTo("CUSTOMER");
         assertThat(created).bodyJson().extractingPath("$.balance").isEqualTo(0);
 
         String id = idOf(created);

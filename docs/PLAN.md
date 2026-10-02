@@ -93,7 +93,7 @@ audit_events     (id, actor, action, resource_id, payload, ts, prev_hash, hash) 
 - [x] Unit test + integration test với Testcontainers (14 test)
 - [x] GitHub Actions CI
 - [x] README + 3 ADR
-- [ ] Tạo repo GitHub `payment-ledger-platform` và push lên
+- [x] Tạo repo GitHub [`caolinh100103/payment-ledger-platform`](https://github.com/caolinh100103/payment-ledger-platform) và push lên
 
 ### ⬜ Phase 2: Core tiền ⭐ quan trọng nhất
 

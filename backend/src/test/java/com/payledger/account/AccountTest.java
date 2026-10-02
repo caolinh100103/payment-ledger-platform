@@ -70,6 +70,25 @@ class AccountTest {
     }
 
     @Test
+    void newAccountIsACustomerAccount() {
+        assertThat(Account.open("user-1", "VND").getType()).isEqualTo(AccountType.CUSTOMER);
+    }
+
+    @Test
+    void systemAccountStatusCannotBeChanged() {
+        Account account = Account.open("system", "VND");
+        ReflectionTestUtils.setField(account, "type", AccountType.SYSTEM);
+
+        assertThatThrownBy(account::freeze)
+                .isInstanceOf(BusinessRuleViolationException.class)
+                .extracting("code").isEqualTo("SYSTEM_ACCOUNT_NOT_MODIFIABLE");
+        assertThatThrownBy(account::close)
+                .isInstanceOf(BusinessRuleViolationException.class)
+                .extracting("code").isEqualTo("SYSTEM_ACCOUNT_NOT_MODIFIABLE");
+        assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+    }
+
+    @Test
     void closedAccountIsTerminal() {
         Account account = Account.open("user-1", "VND");
         account.close();

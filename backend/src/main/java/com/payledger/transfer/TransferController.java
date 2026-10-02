@@ -4,6 +4,7 @@ import com.payledger.common.idempotency.IdempotencyHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
@@ -49,6 +50,25 @@ public class TransferController {
     @GetMapping("/{id}")
     public TransferResponse get(@PathVariable UUID id) {
         return TransferResponse.from(transferService.get(id));
+    }
+
+    /**
+     * Reverses a COMPLETED deposit or transfer in full. 201 with the REVERSAL transfer; 422
+     * TRANSFER_NOT_REVERSIBLE if it is not COMPLETED; 422 with a FAILED reversal (e.g. INSUFFICIENT_FUNDS)
+     * if the money can no longer be taken back.
+     */
+    // Temporary: open to any caller until Phase 4 restricts it to the OPERATOR role.
+    @PostMapping("/{id}/reversals")
+    public ResponseEntity<String> reverse(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
+                                          @PathVariable UUID id,
+                                          @Valid @RequestBody ReverseTransferRequest request,
+                                          HttpServletRequest http) {
+        return idempotency.execute(key, http, request,
+                () -> TransferOutcomes.toResponse(transferService.reverse(id, request.reason())));
+    }
+
+    /** {@code reason} is kept as the reversal's description for the audit trail. */
+    public record ReverseTransferRequest(@NotBlank @Size(max = 140) String reason) {
     }
 
     /** {@code amount} is in the minor unit of {@code currency}, which must match both accounts. */

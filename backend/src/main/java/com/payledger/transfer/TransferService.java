@@ -54,6 +54,37 @@ public class TransferService {
         return execute(Transfer.transfer(sourceAccountId, destinationAccountId, amount, currency, description));
     }
 
+    /**
+     * Undoes a completed deposit or transfer with a compensating REVERSAL that moves the same amount back.
+     * The original transfer and its ledger entries are never modified, only its status becomes REVERSED.
+     *
+     * <p>The original is locked before the accounts. Concurrent reversals of the same transfer therefore
+     * run one after the other and only the first succeeds. Regular transfers never lock transfer rows, so
+     * this extra lock cannot create a deadlock cycle.
+     *
+     * <p>If the account to debit no longer holds the money, the reversal is recorded as FAILED with
+     * INSUFFICIENT_FUNDS and the original stays COMPLETED, so it can be retried once funds are available.
+     */
+    @Transactional
+    public Transfer reverse(UUID originalId, String reason) {
+        Transfer original = transfers.findByIdForUpdate(originalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Transfer", originalId));
+        if (original.getType() == TransferType.REVERSAL) {
+            throw new BusinessRuleViolationException("TRANSFER_NOT_REVERSIBLE",
+                    "Transfer " + originalId + " is itself a reversal; make a new transfer instead");
+        }
+        if (original.getStatus() != TransferStatus.COMPLETED) {
+            throw new BusinessRuleViolationException("TRANSFER_NOT_REVERSIBLE",
+                    "Only COMPLETED transfers can be reversed; transfer " + originalId + " is " + original.getStatus());
+        }
+
+        Transfer reversal = execute(Transfer.reversalOf(original, reason));
+        if (reversal.getStatus() == TransferStatus.COMPLETED) {
+            original.markReversed();
+        }
+        return reversal;
+    }
+
     @Transactional(readOnly = true)
     public Transfer get(UUID id) {
         return transfers.findById(id).orElseThrow(() -> new ResourceNotFoundException("Transfer", id));

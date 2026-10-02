@@ -33,3 +33,8 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+payledger:
+  ledger:
+    # Max wait for an account row lock; beyond it the request fails fast with a retryable 503.
+    lock-timeout: 3s

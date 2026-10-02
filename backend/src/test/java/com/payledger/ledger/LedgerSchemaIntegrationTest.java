@@ -1,12 +1,9 @@
 package com.payledger.ledger;
 
-import com.payledger.TestcontainersConfiguration;
+import com.payledger.support.ApiTestSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.UUID;
@@ -18,12 +15,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * The database is the last line of defence: these invariants must hold even if application code is buggy,
  * so they are tested with raw SQL that bypasses the domain model.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
-class LedgerSchemaIntegrationTest {
-
-    @Autowired
-    JdbcTemplate jdbc;
+class LedgerSchemaIntegrationTest extends ApiTestSupport {
 
     @Autowired
     TransactionTemplate tx;

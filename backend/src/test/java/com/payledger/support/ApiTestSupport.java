@@ -1,0 +1,76 @@
+package com.payledger.support;
+
+import com.jayway.jsonpath.JsonPath;
+import com.payledger.TestcontainersConfiguration;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
+
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
+/** Shared helpers for API integration tests. All tests share one PostgreSQL container and Spring context. */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Import(TestcontainersConfiguration.class)
+public abstract class ApiTestSupport {
+
+    @Autowired
+    protected MockMvcTester mvc;
+
+    @Autowired
+    protected JdbcTemplate jdbc;
+
+    protected String openAccount(String currency) {
+        return openAccount("owner-" + UUID.randomUUID(), currency);
+    }
+
+    protected String openAccount(String ownerId, String currency) {
+        MvcTestResult result = mvc.post().uri("/api/v1/accounts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"ownerId": "%s", "currency": "%s"}
+                        """.formatted(ownerId, currency))
+                .exchange();
+        return jsonPath(result, "$.id");
+    }
+
+    protected MvcTestResult deposit(String accountId, long amount, String currency) {
+        return mvc.post().uri("/api/v1/deposits")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"accountId": "%s", "amount": %d, "currency": "%s", "description": "Top-up"}
+                        """.formatted(accountId, amount, currency))
+                .exchange();
+    }
+
+    protected String fundedAccount(String currency, long amount) {
+        String id = openAccount(currency);
+        deposit(id, amount, currency);
+        return id;
+    }
+
+    protected long balanceOf(String accountId) {
+        return jdbc.queryForObject("SELECT balance FROM accounts WHERE id = ?::uuid", Long.class, accountId);
+    }
+
+    protected String systemAccountId(String currency) {
+        return jdbc.queryForObject("SELECT id::text FROM accounts WHERE type = 'SYSTEM' AND currency = ?",
+                String.class, currency);
+    }
+
+    protected long ledgerEntryCount(String transferId) {
+        return jdbc.queryForObject("SELECT count(*) FROM ledger_entries WHERE transfer_id = ?::uuid",
+                Long.class, transferId);
+    }
+
+    protected static <T> T jsonPath(MvcTestResult result, String path) {
+        byte[] body = result.getMvcResult().getResponse().getContentAsByteArray();
+        return JsonPath.read(new String(body, StandardCharsets.UTF_8), path);
+    }
+}

@@ -96,6 +96,36 @@ public class Account {
         status = AccountStatus.CLOSED;
     }
 
+    /**
+     * Ledger-only: decreases the balance. Business rules (status, available funds) are checked by the
+     * caller so a rejection can be recorded; this guard only stops a bug from overdrawing a customer.
+     */
+    public void debit(long amount) {
+        requirePositive(amount);
+        long newBalance = Math.subtractExact(balance, amount);
+        if (type == AccountType.CUSTOMER && newBalance < 0) {
+            throw new IllegalStateException("Debit of " + amount + " would overdraw customer account " + id);
+        }
+        balance = newBalance;
+    }
+
+    /** Ledger-only: increases the balance. */
+    public void credit(long amount) {
+        requirePositive(amount);
+        balance = Math.addExact(balance, amount);
+    }
+
+    /** System accounts may go negative; customer accounts only spend what they hold. */
+    public boolean canDebit(long amount) {
+        return type == AccountType.SYSTEM || balance >= amount;
+    }
+
+    private static void requirePositive(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be positive, got " + amount);
+        }
+    }
+
     // System accounts back every customer balance; their lifecycle is an operational change, not an API call.
     private void requireCustomer(String action) {
         if (type != AccountType.CUSTOMER) {

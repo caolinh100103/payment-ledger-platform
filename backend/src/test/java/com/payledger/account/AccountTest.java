@@ -70,6 +70,45 @@ class AccountTest {
     }
 
     @Test
+    void creditAndDebitMoveTheBalance() {
+        Account account = Account.open("user-1", "VND");
+
+        account.credit(1_000);
+        account.debit(400);
+
+        assertThat(account.getBalance()).isEqualTo(600);
+        assertThat(account.canDebit(600)).isTrue();
+        assertThat(account.canDebit(601)).isFalse();
+    }
+
+    @Test
+    void customerAccountCannotBeOverdrawn() {
+        Account account = Account.open("user-1", "VND");
+        account.credit(100);
+
+        assertThatThrownBy(() -> account.debit(101)).isInstanceOf(IllegalStateException.class);
+        assertThat(account.getBalance()).isEqualTo(100);
+    }
+
+    @Test
+    void systemAccountMayGoNegative() {
+        Account account = Account.open("system", "VND");
+        ReflectionTestUtils.setField(account, "type", AccountType.SYSTEM);
+
+        account.debit(5_000);
+
+        assertThat(account.getBalance()).isEqualTo(-5_000);
+    }
+
+    @Test
+    void rejectsNonPositiveAmounts() {
+        Account account = Account.open("user-1", "VND");
+
+        assertThatThrownBy(() -> account.credit(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> account.debit(-1)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void newAccountIsACustomerAccount() {
         assertThat(Account.open("user-1", "VND").getType()).isEqualTo(AccountType.CUSTOMER);
     }

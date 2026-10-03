@@ -1,7 +1,12 @@
 package com.payledger.transfer;
 
 import com.payledger.common.idempotency.IdempotencyHandler;
+import com.payledger.common.idempotency.IdempotencyKey;
 import com.payledger.security.Actor;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -30,6 +35,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/v1/deposits")
+@Tag(name = "Deposits")
 public class DepositController {
 
     private final TransferService transferService;
@@ -42,7 +48,12 @@ public class DepositController {
 
     @PostMapping
     @PreAuthorize("hasAuthority('SCOPE_deposits:write')")
-    public ResponseEntity<String> deposit(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
+    @ApiResponse(responseCode = "201", description = "Completed; a redelivery with the same key replays it",
+            content = @Content(schema = @Schema(implementation = TransferResponse.class)))
+    @ApiResponse(responseCode = "422", description = "Rejected by a business rule and recorded as FAILED",
+            content = @Content(mediaType = "application/problem+json", schema = @Schema(ref = "Problem")))
+    public ResponseEntity<String> deposit(@IdempotencyKey
+                                          @RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
                                           @Valid @RequestBody DepositRequest request,
                                           HttpServletRequest http, Actor actor) {
         return idempotency.execute(key, http, request, () -> TransferOutcomes.toResponse(
@@ -56,7 +67,7 @@ public class DepositController {
      */
     public record DepositRequest(
             @NotNull UUID accountId,
-            @Positive @Max(TransferLimits.MAX_AMOUNT) long amount,
+            @Positive @Max(TransferLimits.MAX_AMOUNT) @Schema(requiredMode = Schema.RequiredMode.REQUIRED) long amount,
             @NotNull @Pattern(regexp = "^[A-Z]{3}$", message = "must be an ISO 4217 code, e.g. VND") String currency,
             @Size(max = 140) String description) {
     }

@@ -79,6 +79,19 @@ public class AuditLog {
     }
 
     /**
+     * The newest records first, optionally only those of one {@code actor}, before {@code beforeSeq} (exclusive). The
+     * {@code seq} is the cursor: gapless and only ever growing, so a page never shifts while new records arrive.
+     */
+    @Transactional(readOnly = true)
+    public List<AuditRecord> latest(String actor, Long beforeSeq, int limit) {
+        long before = beforeSeq == null ? Long.MAX_VALUE : beforeSeq;
+        return actor == null
+                ? jdbc.query("SELECT * FROM audit_events WHERE seq < ? ORDER BY seq DESC LIMIT ?", ROW, before, limit)
+                : jdbc.query("SELECT * FROM audit_events WHERE actor = ? AND seq < ? ORDER BY seq DESC LIMIT ?", ROW,
+                actor, before, limit);
+    }
+
+    /**
      * Walks the whole chain in order. Runs in a read-only transaction so PostgreSQL streams the rows through a
      * cursor ({@code fetchSize}) instead of loading the whole log into memory.
      */

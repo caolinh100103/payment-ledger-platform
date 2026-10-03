@@ -1,5 +1,6 @@
 package com.payledger.security.token;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -15,6 +16,7 @@ import java.util.Map;
  * with it, so that rotating keys never rejects a valid token.
  */
 @RestController
+@Tag(name = "Authentication")
 class JwksController {
 
     private final SigningKey signingKey;

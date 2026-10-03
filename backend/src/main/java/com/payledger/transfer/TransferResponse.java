@@ -1,5 +1,7 @@
 package com.payledger.transfer;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -12,10 +14,10 @@ public record TransferResponse(
         UUID destinationAccountId,
         long amount,
         String currency,
-        String description,
-        String failureCode,
-        String failureReason,
-        UUID reversalOf,
+        @Schema(nullable = true) String description,
+        @Schema(nullable = true, description = "Why it FAILED, e.g. INSUFFICIENT_FUNDS") String failureCode,
+        @Schema(nullable = true) String failureReason,
+        @Schema(nullable = true, description = "For a REVERSAL: the movement it reverses") UUID reversalOf,
         Instant createdAt,
         Instant updatedAt) {
 

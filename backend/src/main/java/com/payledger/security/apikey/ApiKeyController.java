@@ -3,6 +3,8 @@ package com.payledger.security.apikey;
 import com.payledger.security.Actor;
 import com.payledger.security.apikey.ApiKeys.ApiKey;
 import com.payledger.security.apikey.ApiKeys.CreatedApiKey;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
@@ -27,6 +29,7 @@ import java.util.UUID;
 /** API keys for machine clients. Only an ADMIN manages them. */
 @RestController
 @RequestMapping("/api/v1/api-keys")
+@Tag(name = "API keys")
 class ApiKeyController {
 
     private final ApiKeys apiKeys;
@@ -38,6 +41,7 @@ class ApiKeyController {
     /** 201 with the key in {@code key}. This is the only time it is shown. */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @ApiResponse(responseCode = "201", description = "Issued")
     ResponseEntity<CreatedApiKeyResponse> create(@Valid @RequestBody CreateApiKeyRequest request, Actor actor) {
         CreatedApiKey created = apiKeys.create(request.name(), request.scopes(), request.expiresAt(), actor);
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()

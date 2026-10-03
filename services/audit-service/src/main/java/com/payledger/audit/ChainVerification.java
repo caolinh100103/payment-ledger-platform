@@ -1,5 +1,7 @@
 package com.payledger.audit;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * Result of re-checking the whole audit chain.
  *
@@ -9,8 +11,9 @@ package com.payledger.audit;
  * @param firstInvalidSeq the first record that fails a check, or null
  * @param problem         what is wrong with it, or null
  */
-public record ChainVerification(boolean valid, long checkedEvents, Long headSeq, String headHash,
-                                Long firstInvalidSeq, String problem) {
+public record ChainVerification(boolean valid, long checkedEvents, @Schema(nullable = true) Long headSeq,
+                                @Schema(nullable = true) String headHash, @Schema(nullable = true) Long firstInvalidSeq,
+                                @Schema(nullable = true) String problem) {
 
     /** Checks records one at a time, in {@code seq} order, and stops at the first problem. */
     static final class Walker {

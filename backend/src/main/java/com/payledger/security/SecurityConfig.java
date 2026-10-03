@@ -28,7 +28,8 @@ import java.util.List;
 
 /**
  * Stateless API security: every request carries its own credentials (a bearer access token, or an API key for a
- * machine client), the server keeps no HTTP session, and no cookie is ever read.
+ * machine client) and the server keeps no HTTP session. The one cookie, the web app's refresh token, is read only by
+ * the browser sign-in endpoints, which guard themselves against CSRF (ADR 0015); it never authenticates an API call.
  *
  * <p>Two layers decide access. The filter chain below only separates public endpoints from the rest. The
  * {@code @PreAuthorize} rule on each controller method decides who may call it, next to the code it protects;
@@ -53,7 +54,8 @@ class SecurityConfig implements WebMvcConfigurer {
             throws Exception {
         http
                 // CSRF forges requests that ride on credentials the browser attaches by itself (cookies). A bearer
-                // token is only sent when the client's code adds it, so there is nothing to forge.
+                // token is only sent when the client's code adds it, so there is nothing to forge. The refresh cookie
+                // is SameSite=Strict and its endpoints require a custom header (BrowserSessionController).
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -63,6 +65,9 @@ class SecurityConfig implements WebMvcConfigurer {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/.well-known/jwks.json").permitAll()
+                        // The API's OpenAPI document and Swagger UI: public, like Stripe's API reference.
+                        .requestMatchers(HttpMethod.GET, "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**")
+                        .permitAll()
                         // Probes and Prometheus scraping; in production the management port is not exposed publicly.
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/actuator/**").hasRole(Role.ADMIN.name())

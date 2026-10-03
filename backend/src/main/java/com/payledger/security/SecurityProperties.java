@@ -8,9 +8,11 @@ import java.time.Duration;
  * {@code payledger.security.*}, see {@code application.yml} for the defaults and their reasons.
  *
  * @param bootstrapAdmin the first ADMIN, created at startup when no ADMIN exists and a password is set
+ * @param browser        sign-in sessions of the web app, whose refresh token lives in a cookie
  */
 @ConfigurationProperties("payledger.security")
-public record SecurityProperties(Jwt jwt, Refresh refresh, Login login, BootstrapAdmin bootstrapAdmin) {
+public record SecurityProperties(Jwt jwt, Refresh refresh, Login login, BootstrapAdmin bootstrapAdmin,
+                                 Browser browser) {
 
     /**
      * @param signingKey the private EC P-256 key as a JWK (JSON); blank means a random key per start
@@ -29,5 +31,12 @@ public record SecurityProperties(Jwt jwt, Refresh refresh, Login login, Bootstra
     }
 
     public record BootstrapAdmin(String username, String password) {
+    }
+
+    /**
+     * @param secureCookie whether the refresh token cookie is {@code Secure} (sent over HTTPS only; browsers also
+     *                     treat http://localhost as secure). Off only to try the app over plain HTTP on another host.
+     */
+    public record Browser(boolean secureCookie) {
     }
 }

@@ -1,0 +1,37 @@
+name: Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/**
+      - .github/workflows/infra.yml
+  pull_request:
+    paths:
+      - infra/**
+      - .github/workflows/infra.yml
+
+jobs:
+  observability:
+    name: alerts, dashboards and compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same Prometheus image as infra/docker-compose.yml, for its promtool.
+      - name: Check the Prometheus config and alert rules
+        run: >
+          docker run --rm -v "$PWD/infra/prometheus:/etc/prometheus:ro" --entrypoint promtool
+          prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
+
+      - name: Unit-test the alert rules
+        run: >
+          docker run --rm -v "$PWD/infra/prometheus:/rules:ro" -w /rules --entrypoint promtool
+          prom/prometheus:v3.15.0 test rules alerts.test.yml
+
+      - name: Dashboards are valid JSON
+        run: for f in infra/grafana/dashboards/*.json; do python3 -m json.tool "$f" > /dev/null || exit 1; done
+
+      - name: The compose file is valid, with and without the app profile
+        working-directory: infra
+        run: docker compose config --quiet && docker compose --profile app config --quiet

@@ -1,0 +1,1724 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "Accounts, deposits, transfers and reversals on a double-entry ledger, and the sign-in, user and API key management that guards them. Amounts are integers in the currency's minor unit. Errors are RFC 9457 problem details with a stable `code`.",
+    "title" : "PayLedger Core API",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "/"
+  } ],
+  "paths" : {
+    "/.well-known/jwks.json" : {
+      "get" : {
+        "operationId" : "jwks_jwks",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/accounts" : {
+      "get" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR')`",
+        "operationId" : "account_list",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "ownerId",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AccountResponse"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      },
+      "post" : {
+        "description" : "**Access:** `hasRole('CUSTOMER')`",
+        "operationId" : "account_open",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OpenAccountRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "Opened"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/accounts/{id}" : {
+      "get" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR')`",
+        "operationId" : "account_get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/accounts/{id}/close" : {
+      "post" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR')`",
+        "operationId" : "account_close",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/accounts/{id}/freeze" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "account_freeze",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/accounts/{id}/ledger-entries" : {
+      "get" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR')`",
+        "operationId" : "accountStatement_ledgerEntries",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "in" : "query",
+          "name" : "startingAfter",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementPage"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/accounts/{id}/unfreeze" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "account_unfreeze",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Accounts" ]
+      }
+    },
+    "/api/v1/api-keys" : {
+      "get" : {
+        "description" : "**Access:** `hasRole('ADMIN')`",
+        "operationId" : "apiKey_list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ApiKey"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "API keys" ]
+      },
+      "post" : {
+        "description" : "**Access:** `hasRole('ADMIN')`",
+        "operationId" : "apiKey_create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreatedApiKeyResponse"
+                }
+              }
+            },
+            "description" : "Issued"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "API keys" ]
+      }
+    },
+    "/api/v1/api-keys/{id}" : {
+      "get" : {
+        "description" : "**Access:** `hasRole('ADMIN')`",
+        "operationId" : "apiKey_get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiKey"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "API keys" ]
+      }
+    },
+    "/api/v1/api-keys/{id}/revoke" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('ADMIN')`",
+        "operationId" : "apiKey_revoke",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiKey"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "API keys" ]
+      }
+    },
+    "/api/v1/auth/browser/login" : {
+      "post" : {
+        "operationId" : "browserSession_login",
+        "parameters" : [ {
+          "description" : "Any value; its presence proves a same-origin request (OWASP custom request header)",
+          "example" : "XMLHttpRequest",
+          "in" : "header",
+          "name" : "X-Requested-With",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrowserTokenResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/browser/logout" : {
+      "post" : {
+        "operationId" : "browserSession_logout",
+        "parameters" : [ {
+          "description" : "Any value; its presence proves a same-origin request (OWASP custom request header)",
+          "example" : "XMLHttpRequest",
+          "in" : "header",
+          "name" : "X-Requested-With",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/browser/refresh" : {
+      "post" : {
+        "operationId" : "browserSession_refresh",
+        "parameters" : [ {
+          "description" : "Any value; its presence proves a same-origin request (OWASP custom request header)",
+          "example" : "XMLHttpRequest",
+          "in" : "header",
+          "name" : "X-Requested-With",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BrowserTokenResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/login" : {
+      "post" : {
+        "operationId" : "auth_login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/logout" : {
+      "post" : {
+        "operationId" : "auth_logout",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/refresh" : {
+      "post" : {
+        "operationId" : "auth_refresh",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/auth/signup" : {
+      "post" : {
+        "operationId" : "auth_signup",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Authentication" ]
+      }
+    },
+    "/api/v1/deposits" : {
+      "post" : {
+        "description" : "**Access:** `hasAuthority('SCOPE_deposits:write')`",
+        "operationId" : "deposit_deposit",
+        "parameters" : [ {
+          "description" : "A new unique value (e.g. a UUID) per operation. A retry with the same key and body returns the original outcome instead of moving money twice; with a different body, 422 IDEMPOTENCY_KEY_REUSED.",
+          "example" : "6f1c2a9e-0d1b-4c55-9b3e-7a2f8e4d1c00",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DepositRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransferResponse"
+                }
+              }
+            },
+            "description" : "Completed; a redelivery with the same key replays it"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Rejected by a business rule and recorded as FAILED"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ],
+        "tags" : [ "Deposits" ]
+      }
+    },
+    "/api/v1/transfers" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('CUSTOMER')`",
+        "operationId" : "transfer_create",
+        "parameters" : [ {
+          "description" : "A new unique value (e.g. a UUID) per operation. A retry with the same key and body returns the original outcome instead of moving money twice; with a different body, 422 IDEMPOTENCY_KEY_REUSED.",
+          "example" : "6f1c2a9e-0d1b-4c55-9b3e-7a2f8e4d1c00",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateTransferRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransferResponse"
+                }
+              }
+            },
+            "description" : "Completed; a retry with the same key replays it"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Rejected by a business rule and recorded as FAILED (`transferId`); a retry replays it"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Transfers" ]
+      }
+    },
+    "/api/v1/transfers/{id}" : {
+      "get" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR')`",
+        "operationId" : "transfer_get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransferResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Transfers" ]
+      }
+    },
+    "/api/v1/transfers/{id}/reversals" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "transfer_reverse",
+        "parameters" : [ {
+          "description" : "A new unique value (e.g. a UUID) per operation. A retry with the same key and body returns the original outcome instead of moving money twice; with a different body, 422 IDEMPOTENCY_KEY_REUSED.",
+          "example" : "6f1c2a9e-0d1b-4c55-9b3e-7a2f8e4d1c00",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReverseTransferRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransferResponse"
+                }
+              }
+            },
+            "description" : "The completed REVERSAL"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Not reversible, or the reversal was rejected and recorded as FAILED"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Transfers" ]
+      }
+    },
+    "/api/v1/users" : {
+      "get" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "user_find",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "username",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 64,
+            "minLength" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/UserResponse"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Users" ]
+      },
+      "post" : {
+        "description" : "**Access:** `hasRole('ADMIN')`",
+        "operationId" : "user_create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Users" ]
+      }
+    },
+    "/api/v1/users/me" : {
+      "get" : {
+        "description" : "**Access:** `hasAnyRole('CUSTOMER', 'OPERATOR', 'AUDITOR', 'ADMIN')`",
+        "operationId" : "user_me",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Users" ]
+      }
+    },
+    "/api/v1/users/{id}" : {
+      "get" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "user_get",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Users" ]
+      }
+    },
+    "/api/v1/users/{id}/unlock" : {
+      "post" : {
+        "description" : "**Access:** `hasRole('OPERATOR')`",
+        "operationId" : "user_unlock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "tags" : [ "Users" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AccountResponse" : {
+        "type" : "object",
+        "properties" : {
+          "balance" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "ownerId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "FROZEN", "CLOSED" ]
+          },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "CUSTOMER", "SYSTEM" ]
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "balance", "createdAt", "currency", "id", "ownerId", "status", "type", "updatedAt" ]
+      },
+      "ApiKey" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "lastUsedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "prefix" : {
+            "type" : "string"
+          },
+          "revokedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "scopes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "enum" : [ "deposits:write" ]
+            },
+            "uniqueItems" : true
+          }
+        },
+        "required" : [ "createdAt", "createdBy", "expiresAt", "id", "lastUsedAt", "name", "prefix", "revokedAt", "scopes" ]
+      },
+      "BrowserTokenResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accessToken" : {
+            "type" : "string"
+          },
+          "expiresIn" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "refreshExpiresIn" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tokenType" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "accessToken", "expiresIn", "refreshExpiresIn", "tokenType" ]
+      },
+      "CreateApiKeyRequest" : {
+        "type" : "object",
+        "properties" : {
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "name" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          },
+          "scopes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "enum" : [ "deposits:write" ]
+            },
+            "minItems" : 1,
+            "uniqueItems" : true
+          }
+        },
+        "required" : [ "name", "scopes" ]
+      },
+      "CreateTransferRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64",
+            "exclusiveMinimum" : 0,
+            "maximum" : 1000000000000000
+          },
+          "currency" : {
+            "type" : "string",
+            "pattern" : "^[A-Z]{3}$"
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 140,
+            "minLength" : 0
+          },
+          "destinationAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sourceAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "amount", "currency", "destinationAccountId", "sourceAccountId" ]
+      },
+      "CreateUserRequest" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "maxLength" : 256,
+            "minLength" : 0
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "CUSTOMER", "OPERATOR", "AUDITOR", "ADMIN" ]
+          },
+          "username" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$"
+          }
+        },
+        "required" : [ "password", "role", "username" ]
+      },
+      "CreatedApiKeyResponse" : {
+        "type" : "object",
+        "properties" : {
+          "apiKey" : {
+            "$ref" : "#/components/schemas/ApiKey"
+          },
+          "key" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "apiKey", "key" ]
+      },
+      "DepositRequest" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64",
+            "exclusiveMinimum" : 0,
+            "maximum" : 1000000000000000
+          },
+          "currency" : {
+            "type" : "string",
+            "pattern" : "^[A-Z]{3}$"
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 140,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "accountId", "amount", "currency" ]
+      },
+      "InvalidParam" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "name", "reason" ]
+      },
+      "LoginRequest" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "maxLength" : 256,
+            "minLength" : 0
+          },
+          "username" : {
+            "type" : "string",
+            "maxLength" : 64,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "password", "username" ]
+      },
+      "OpenAccountRequest" : {
+        "type" : "object",
+        "properties" : {
+          "currency" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[A-Z]{3}$"
+          }
+        },
+        "required" : [ "currency" ]
+      },
+      "Problem" : {
+        "type" : "object",
+        "description" : "RFC 9457 problem details with a stable `code`",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "example" : "INSUFFICIENT_FUNDS"
+          },
+          "detail" : {
+            "type" : "string",
+            "description" : "For a person, not for code to parse"
+          },
+          "instance" : {
+            "type" : "string",
+            "description" : "The request path"
+          },
+          "invalidParams" : {
+            "type" : "array",
+            "description" : "The fields that failed validation (code INVALID_REQUEST), as in RFC 9457's example",
+            "items" : {
+              "$ref" : "#/components/schemas/InvalidParam"
+            }
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32",
+            "example" : 422
+          },
+          "title" : {
+            "type" : "string",
+            "example" : "Unprocessable Content"
+          },
+          "transferId" : {
+            "type" : "string",
+            "format" : "uuid",
+            "description" : "The FAILED movement recorded when a business rule rejected a deposit, transfer or reversal"
+          },
+          "type" : {
+            "type" : "string",
+            "example" : "about:blank"
+          }
+        },
+        "required" : [ "code", "status", "title", "type" ]
+      },
+      "RefreshRequest" : {
+        "type" : "object",
+        "properties" : {
+          "refreshToken" : {
+            "type" : "string",
+            "maxLength" : 256,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "refreshToken" ]
+      },
+      "ReverseTransferRequest" : {
+        "type" : "object",
+        "properties" : {
+          "reason" : {
+            "type" : "string",
+            "maxLength" : 140,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "SignupRequest" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "maxLength" : 256,
+            "minLength" : 0
+          },
+          "username" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$"
+          }
+        },
+        "required" : [ "password", "username" ]
+      },
+      "StatementEntry" : {
+        "type" : "object",
+        "properties" : {
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "balanceAfter" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "The account's balance right after this entry"
+          },
+          "counterpartyAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : [ "string", "null" ]
+          },
+          "direction" : {
+            "type" : "string",
+            "description" : "DEBIT takes money out of the account, CREDIT puts it in",
+            "enum" : [ "DEBIT", "CREDIT" ]
+          },
+          "id" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Entry id; pass the last one as startingAfter for the next page"
+          },
+          "transferId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "transferStatus" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "COMPLETED", "FAILED", "REVERSED" ]
+          },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "DEPOSIT", "TRANSFER", "REVERSAL" ]
+          }
+        },
+        "required" : [ "amount", "balanceAfter", "counterpartyAccountId", "createdAt", "currency", "description", "direction", "id", "transferId", "transferStatus", "type" ]
+      },
+      "StatementPage" : {
+        "type" : "object",
+        "properties" : {
+          "data" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StatementEntry"
+            }
+          },
+          "hasMore" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "data", "hasMore" ]
+      },
+      "TokenResponse" : {
+        "type" : "object",
+        "properties" : {
+          "accessToken" : {
+            "type" : "string"
+          },
+          "expiresIn" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "refreshExpiresIn" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "refreshToken" : {
+            "type" : "string"
+          },
+          "tokenType" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "accessToken", "expiresIn", "refreshExpiresIn", "refreshToken", "tokenType" ]
+      },
+      "TransferResponse" : {
+        "type" : "object",
+        "properties" : {
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : [ "string", "null" ]
+          },
+          "destinationAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "failureCode" : {
+            "type" : [ "string", "null" ],
+            "description" : "Why it FAILED, e.g. INSUFFICIENT_FUNDS"
+          },
+          "failureReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "reversalOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid",
+            "description" : "For a REVERSAL: the movement it reverses"
+          },
+          "sourceAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "COMPLETED", "FAILED", "REVERSED" ]
+          },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "DEPOSIT", "TRANSFER", "REVERSAL" ]
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "amount", "createdAt", "currency", "description", "destinationAccountId", "failureCode", "failureReason", "id", "reversalOf", "sourceAccountId", "status", "type", "updatedAt" ]
+      },
+      "UserResponse" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "lastLoginAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "lockedUntil" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "CUSTOMER", "OPERATOR", "AUDITOR", "ADMIN" ]
+          },
+          "username" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "createdAt", "id", "lastLoginAt", "lockedUntil", "role", "username" ]
+      }
+    },
+    "securitySchemes" : {
+      "apiKey" : {
+        "description" : "A machine client's key, e.g. the partner bank's, with its scopes",
+        "in" : "header",
+        "name" : "X-API-Key",
+        "type" : "apiKey"
+      },
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "description" : "An ES256 access token (RFC 9068) from /api/v1/auth/login",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}

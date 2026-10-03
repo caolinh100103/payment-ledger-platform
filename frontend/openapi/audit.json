@@ -1,0 +1,288 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "The tamper-evident audit trail: every event of the platform, hash-chained. Read-only, for auditors.",
+    "title" : "PayLedger Audit API",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "/"
+  } ],
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ],
+  "paths" : {
+    "/api/v1/audit-events" : {
+      "get" : {
+        "operationId" : "byResource",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "resourceId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AuditEventResponse"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Audit events" ]
+      }
+    },
+    "/api/v1/audit-events/latest" : {
+      "get" : {
+        "operationId" : "latest",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "actor",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 64,
+            "minLength" : 0
+          }
+        }, {
+          "in" : "query",
+          "name" : "beforeSeq",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64",
+            "minimum" : 1
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 200,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AuditEventPage"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Audit events" ]
+      }
+    },
+    "/api/v1/audit-events/verification" : {
+      "get" : {
+        "operationId" : "verify",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChainVerification"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Audit events" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "AuditEventPage" : {
+        "type" : "object",
+        "properties" : {
+          "data" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AuditEventResponse"
+            }
+          },
+          "hasMore" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "data", "hasMore" ]
+      },
+      "AuditEventResponse" : {
+        "type" : "object",
+        "properties" : {
+          "action" : {
+            "type" : "string"
+          },
+          "actor" : {
+            "type" : "string"
+          },
+          "event" : {
+            "type" : "object",
+            "additionalProperties" : { },
+            "description" : "The CloudEvent as received"
+          },
+          "eventId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "hash" : {
+            "type" : "string"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "prevHash" : {
+            "type" : "string"
+          },
+          "recordedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "resourceId" : {
+            "type" : [ "string", "null" ]
+          },
+          "seq" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "action", "actor", "event", "eventId", "hash", "occurredAt", "prevHash", "recordedAt", "resourceId", "seq" ]
+      },
+      "ChainVerification" : {
+        "type" : "object",
+        "properties" : {
+          "checkedEvents" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "firstInvalidSeq" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "headHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "headSeq" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "problem" : {
+            "type" : [ "string", "null" ]
+          },
+          "valid" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "checkedEvents", "firstInvalidSeq", "headHash", "headSeq", "problem", "valid" ]
+      },
+      "InvalidParam" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "name", "reason" ]
+      },
+      "Problem" : {
+        "type" : "object",
+        "description" : "RFC 9457 problem details with a stable `code`",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "example" : "ACCESS_DENIED"
+          },
+          "detail" : {
+            "type" : "string",
+            "description" : "For a person, not for code to parse"
+          },
+          "instance" : {
+            "type" : "string",
+            "description" : "The request path"
+          },
+          "invalidParams" : {
+            "type" : "array",
+            "description" : "The parameters that failed validation (code INVALID_REQUEST)",
+            "items" : {
+              "$ref" : "#/components/schemas/InvalidParam"
+            }
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32",
+            "example" : 403
+          },
+          "title" : {
+            "type" : "string",
+            "example" : "Forbidden"
+          },
+          "type" : {
+            "type" : "string",
+            "example" : "about:blank"
+          }
+        },
+        "required" : [ "code", "status", "title", "type" ]
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "description" : "An access token issued by the core service, verified with its JWKS",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}

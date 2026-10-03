@@ -17,7 +17,7 @@ import java.util.UUID;
 /** Shared helpers for API integration tests. All tests share one PostgreSQL container and Spring context. */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, DefaultAccessToken.class})
 public abstract class ApiTestSupport {
 
     @Autowired

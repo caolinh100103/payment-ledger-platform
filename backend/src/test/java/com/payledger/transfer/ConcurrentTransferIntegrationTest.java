@@ -2,6 +2,8 @@ package com.payledger.transfer;
 
 import com.jayway.jsonpath.JsonPath;
 import com.payledger.TestcontainersConfiguration;
+import com.payledger.security.Role;
+import com.payledger.security.token.AccessTokens;
 import com.payledger.support.LedgerInvariants;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,12 +49,17 @@ class ConcurrentTransferIntegrationTest {
     @Autowired
     JdbcTemplate jdbc;
 
+    @Autowired
+    AccessTokens accessTokens;
+
     private HttpClient http;
+    private String accessToken;
     private long deadlocksBefore;
 
     @BeforeEach
     void setUp() {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        accessToken = accessTokens.issue(UUID.randomUUID(), Role.OPERATOR).value();
         deadlocksBefore = deadlockCount();
     }
 
@@ -186,6 +193,7 @@ class ConcurrentTransferIntegrationTest {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + accessToken)
                 .POST(HttpRequest.BodyPublishers.ofString(json));
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);

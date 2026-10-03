@@ -58,6 +58,25 @@ management:
       application: ${spring.application.name}
 
 payledger:
+  security:
+    jwt:
+      # Must match on every service that verifies the tokens.
+      issuer: ${PAYLEDGER_JWT_ISSUER:http://localhost:8080}
+      audience: payledger-api
+      # RFC 9068 client_id claim: the application the user signed in with.
+      client-id: payledger-app
+      # Short, because an access token cannot be revoked; the refresh token gets the next one.
+      access-token-ttl: 5m
+      # Private EC P-256 JWK (JSON with a kid), from a secret store. Empty: a random key per start (dev only).
+      signing-key: ${PAYLEDGER_JWT_SIGNING_KEY:}
+    login:
+      # As VCB Digibank: the 5th wrong password in a row locks the user out.
+      max-failed-attempts: 5
+      lockout-duration: 15m
+    bootstrap-admin:
+      # Created at startup only if no ADMIN exists and a password is set (at least 15 characters).
+      username: ${PAYLEDGER_ADMIN_USERNAME:admin}
+      password: ${PAYLEDGER_ADMIN_PASSWORD:}
   kafka:
     topics:
       transfers:

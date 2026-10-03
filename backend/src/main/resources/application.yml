@@ -46,6 +46,11 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+springdoc:
+  # Sorted keys, so the copy of the document in frontend/openapi changes only where the API does.
+  writer-with-order-by-keys: true
+  default-produces-media-type: application/json
+
 logging:
   structured:
     format:
@@ -122,6 +127,10 @@ payledger:
       # Absolute lifetime of a sign-in session (a working day), however active the user is.
       session-ttl: 8h
       cleanup-interval: PT1H
+    browser:
+      # The web app's refresh token cookie is Secure: HTTPS only (browsers also accept http://localhost). Turn off only
+      # to try the app over plain HTTP on another host.
+      secure-cookie: ${PAYLEDGER_SECURE_COOKIE:true}
     login:
       # As VCB Digibank: the 5th wrong password in a row locks the user out.
       max-failed-attempts: 5

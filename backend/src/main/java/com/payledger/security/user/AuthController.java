@@ -1,19 +1,9 @@
 package com.payledger.security.user;
 
 import com.payledger.security.Actor;
-import com.payledger.security.AuthenticationFailedException;
 import com.payledger.security.Role;
-import com.payledger.security.token.AccessTokens;
-import com.payledger.security.token.AccessTokens.IssuedToken;
 import com.payledger.security.token.Sessions;
-import com.payledger.security.token.Sessions.Invalid;
-import com.payledger.security.token.Sessions.IssuedRefreshToken;
-import com.payledger.security.token.Sessions.Refreshed;
-import com.payledger.security.token.Sessions.Reused;
-import com.payledger.security.token.Sessions.Started;
-import com.payledger.security.user.LoginService.Locked;
-import com.payledger.security.user.LoginService.Rejected;
-import com.payledger.security.user.LoginService.Succeeded;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -27,27 +17,23 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.UUID;
-
 /**
  * Public endpoints: signing up, signing in, refreshing and signing out. Everything else needs the access token
- * they hand out.
+ * they hand out. For API clients, which keep the refresh token themselves; the web app uses
+ * {@link BrowserSessionController}, which keeps it in a cookie.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
+@Tag(name = "Authentication")
 class AuthController {
 
     private final UserService userService;
-    private final LoginService loginService;
-    private final AccessTokens accessTokens;
+    private final TokenGrants grants;
     private final Sessions sessions;
 
-    AuthController(UserService userService, LoginService loginService, AccessTokens accessTokens, Sessions sessions) {
+    AuthController(UserService userService, TokenGrants grants, Sessions sessions) {
         this.userService = userService;
-        this.loginService = loginService;
-        this.accessTokens = accessTokens;
+        this.grants = grants;
         this.sessions = sessions;
     }
 
@@ -64,17 +50,7 @@ class AuthController {
     @PostMapping("/login")
     @PreAuthorize("permitAll()")
     TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
-        return switch (loginService.login(request.username(), request.password(), http.getRemoteAddr())) {
-            case Succeeded succeeded -> {
-                Started session = sessions.start(succeeded.user().getId());
-                yield tokens(succeeded.user(), session.sessionId(), session.refreshToken());
-            }
-            case Rejected rejected -> throw new AuthenticationFailedException("INVALID_CREDENTIALS",
-                    "The username or password is incorrect");
-            case Locked locked -> throw new AuthenticationFailedException("ACCOUNT_LOCKED",
-                    "Too many failed sign-ins; try again later or contact support",
-                    Duration.between(Instant.now(), locked.until()));
-        };
+        return TokenResponse.of(grants.password(request.username(), request.password(), http.getRemoteAddr()));
     }
 
     /**
@@ -84,15 +60,7 @@ class AuthController {
     @PostMapping("/refresh")
     @PreAuthorize("permitAll()")
     TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
-        return switch (sessions.refresh(request.refreshToken())) {
-            // The role is read again, so a role change takes effect within one access token lifetime.
-            case Refreshed refreshed -> tokens(userService.get(refreshed.userId()), refreshed.sessionId(),
-                    refreshed.refreshToken());
-            case Invalid invalid -> throw new AuthenticationFailedException("INVALID_REFRESH_TOKEN",
-                    "The refresh token is invalid or has expired; sign in again");
-            case Reused reused -> throw new AuthenticationFailedException("REFRESH_TOKEN_REUSED",
-                    "This refresh token was already used, so the session was ended for safety; sign in again");
-        };
+        return TokenResponse.of(grants.refreshToken(request.refreshToken()));
     }
 
     /**
@@ -104,10 +72,6 @@ class AuthController {
     @PreAuthorize("permitAll()")
     void logout(@Valid @RequestBody RefreshRequest request) {
         sessions.revoke(request.refreshToken());
-    }
-
-    private TokenResponse tokens(UserAccount user, UUID sessionId, IssuedRefreshToken refreshToken) {
-        return TokenResponse.of(accessTokens.issue(user.getId(), user.getRole(), sessionId), refreshToken);
     }
 
     record SignupRequest(
@@ -131,9 +95,10 @@ class AuthController {
     record TokenResponse(String accessToken, String tokenType, long expiresIn, String refreshToken,
                          long refreshExpiresIn) {
 
-        static TokenResponse of(IssuedToken accessToken, IssuedRefreshToken refreshToken) {
-            return new TokenResponse(accessToken.value(), "Bearer", accessToken.expiresIn().toSeconds(),
-                    refreshToken.value(), refreshToken.expiresIn().toSeconds());
+        static TokenResponse of(TokenGrants.Tokens tokens) {
+            return new TokenResponse(tokens.accessToken().value(), "Bearer",
+                    tokens.accessToken().expiresIn().toSeconds(), tokens.refreshToken().value(),
+                    tokens.refreshToken().expiresIn().toSeconds());
         }
     }
 }

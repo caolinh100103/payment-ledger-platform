@@ -1,0 +1,149 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "description" : "The messages sent to customers, such as the balance-change SMS after every movement.",
+    "title" : "PayLedger Notification API",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "/"
+  } ],
+  "security" : [ {
+    "bearerAuth" : [ ]
+  } ],
+  "paths" : {
+    "/api/v1/notifications" : {
+      "get" : {
+        "operationId" : "byRecipient",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "recipientId",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/Notification"
+                  }
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "An RFC 9457 problem; `code` says what went wrong"
+          }
+        },
+        "tags" : [ "Notifications" ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "InvalidParam" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "name", "reason" ]
+      },
+      "Notification" : {
+        "type" : "object",
+        "properties" : {
+          "channel" : {
+            "type" : "string",
+            "enum" : [ "SMS", "EMAIL", "PUSH" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "eventId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "recipientId" : {
+            "type" : "string"
+          },
+          "template" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "channel", "createdAt", "eventId", "id", "message", "recipientId", "template" ]
+      },
+      "Problem" : {
+        "type" : "object",
+        "description" : "RFC 9457 problem details with a stable `code`",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "example" : "ACCESS_DENIED"
+          },
+          "detail" : {
+            "type" : "string",
+            "description" : "For a person, not for code to parse"
+          },
+          "instance" : {
+            "type" : "string",
+            "description" : "The request path"
+          },
+          "invalidParams" : {
+            "type" : "array",
+            "description" : "The parameters that failed validation (code INVALID_REQUEST)",
+            "items" : {
+              "$ref" : "#/components/schemas/InvalidParam"
+            }
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32",
+            "example" : 403
+          },
+          "title" : {
+            "type" : "string",
+            "example" : "Forbidden"
+          },
+          "type" : {
+            "type" : "string",
+            "example" : "about:blank"
+          }
+        },
+        "required" : [ "code", "status", "title", "type" ]
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "description" : "An access token issued by the core service, verified with its JWKS",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  }
+}

@@ -13,6 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -60,6 +61,12 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserAccount get(UUID id) {
         return users.findById(id).orElseThrow(() -> new ResourceNotFoundException("User", id));
+    }
+
+    /** Exact match on the normalized username; no partial search, so the user list cannot be walked. */
+    @Transactional(readOnly = true)
+    public Optional<UserAccount> findByUsername(String username) {
+        return users.findByUsername(UserAccount.normalize(username));
     }
 
     @Transactional

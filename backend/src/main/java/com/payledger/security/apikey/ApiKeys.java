@@ -3,8 +3,9 @@ package com.payledger.security.apikey;
 import com.payledger.common.error.ResourceNotFoundException;
 import com.payledger.security.Actor;
 import com.payledger.security.Secrets;
-import com.payledger.security.SecurityEvents;
 import com.payledger.security.SecurityEvents.ApiKeyData;
+import com.payledger.security.SecurityEvents;
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -47,7 +48,8 @@ public class ApiKeys {
 
     /** A key as listed: everything but the secret. */
     public record ApiKey(UUID id, String name, String prefix, Set<ApiKeyScope> scopes, String createdBy,
-                         Instant createdAt, Instant expiresAt, Instant revokedAt, Instant lastUsedAt) {
+                         Instant createdAt, @Schema(nullable = true) Instant expiresAt,
+                         @Schema(nullable = true) Instant revokedAt, @Schema(nullable = true) Instant lastUsedAt) {
     }
 
     /** @param key the full key, available only here */

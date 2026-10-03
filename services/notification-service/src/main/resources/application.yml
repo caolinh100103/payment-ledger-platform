@@ -7,6 +7,9 @@ spring:
     password: ${NOTIFICATION_DB_PASSWORD:notification}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    template:
+      # Forwards to the retry and dead-letter topics get a span of their own, in the same trace.
+      observation-enabled: true
     consumer:
       group-id: notification-service
       # A new deployment starts from the oldest retained event rather than missing what happened before it.
@@ -14,6 +17,9 @@ spring:
     listener:
       # Commit each offset right after its record was processed (and its database transaction committed).
       ack-mode: record
+      # Continue the trace in the record's traceparent header, written by the core's outbox relay: this service's
+      # spans and log lines join the trace of the request that caused the event.
+      observation-enabled: true
       concurrency: 3
 
 server:
@@ -28,6 +34,21 @@ management:
     health:
       probes:
         enabled: true
+  tracing:
+    sampling:
+      # Every trace is kept here; production keeps a fraction or lets a collector choose (tail sampling).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Jaeger in infra/docker-compose.yml takes OTLP over HTTP.
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Prometheus scrapes /actuator/prometheus; the OpenTelemetry starter's OTLP metrics push stays off.
+        enabled: false
   metrics:
     tags:
       application: ${spring.application.name}

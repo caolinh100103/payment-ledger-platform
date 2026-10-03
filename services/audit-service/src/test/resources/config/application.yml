@@ -1,0 +1,7 @@
+# Test-only settings, read after classpath:application.yml.
+management:
+  tracing:
+    export:
+      otlp:
+        # Spans are still created and propagated (the trace context tests rely on it), just not sent anywhere.
+        enabled: false

@@ -19,10 +19,12 @@ public class Outbox {
 
     private final JdbcTemplate jdbc;
     private final JsonMapper jsonMapper;
+    private final OutboxTracing tracing;
 
-    public Outbox(JdbcTemplate jdbc, JsonMapper jsonMapper) {
+    public Outbox(JdbcTemplate jdbc, JsonMapper jsonMapper, OutboxTracing tracing) {
         this.jdbc = jdbc;
         this.jsonMapper = jsonMapper;
+        this.tracing = tracing;
     }
 
     /**
@@ -30,12 +32,16 @@ public class Outbox {
      *
      * <p>{@code MANDATORY}: an event written in a transaction of its own would be exactly the dual write this
      * class exists to prevent, so calling it without a transaction is a programming error.
+     *
+     * <p>The event is stamped with the current trace context (see {@link OutboxTracing}), so its publication and
+     * consumption join the trace of the request that caused it.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void append(String topic, String aggregateType, UUID aggregateId, CloudEvent<?> event) {
+        CloudEvent<?> traced = tracing.stamp(event);
         jdbc.update("""
                 INSERT INTO outbox (event_id, aggregate_type, aggregate_id, event_type, topic, payload)
                 VALUES (?, ?, ?, ?, ?, ?::json)
-                """, event.id(), aggregateType, aggregateId, event.type(), topic, jsonMapper.writeValueAsString(event));
+                """, traced.id(), aggregateType, aggregateId, traced.type(), topic, jsonMapper.writeValueAsString(traced));
     }
 }

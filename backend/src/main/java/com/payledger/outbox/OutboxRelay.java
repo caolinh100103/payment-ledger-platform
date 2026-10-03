@@ -2,6 +2,7 @@ package com.payledger.outbox;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import io.micrometer.tracing.Span;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
@@ -55,9 +56,10 @@ public class OutboxRelay {
     private final Duration sendTimeout;
     private final MeterRegistry meters;
     private final Timer deliveryDelay;
+    private final OutboxTracing tracing;
 
     public OutboxRelay(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, PlatformTransactionManager txManager,
-                       MeterRegistry meters,
+                       MeterRegistry meters, OutboxTracing tracing,
                        @Value("${payledger.outbox.relay.batch-size:100}") int batchSize,
                        @Value("${payledger.outbox.relay.send-timeout:15s}") Duration sendTimeout) {
         this.jdbc = jdbc;
@@ -66,6 +68,7 @@ public class OutboxRelay {
         this.batchSize = batchSize;
         this.sendTimeout = sendTimeout;
         this.meters = meters;
+        this.tracing = tracing;
         this.deliveryDelay = Timer.builder("payledger.outbox.delivery.delay")
                 .description("Time from an event's commit to its acknowledgement by Kafka")
                 .publishPercentileHistogram()
@@ -96,7 +99,8 @@ public class OutboxRelay {
     private List<PendingEvent> lockNextBatch() {
         long now = System.nanoTime();
         return jdbc.query("""
-                SELECT id, aggregate_id, topic, payload::text AS payload,
+                SELECT id, event_id, event_type, aggregate_id, topic, payload::text AS payload,
+                       payload ->> 'traceparent' AS traceparent, payload ->> 'tracestate' AS tracestate,
                        extract(epoch FROM clock_timestamp() - created_at) AS age_seconds
                 FROM outbox o
                 WHERE published_at IS NULL
@@ -107,8 +111,9 @@ public class OutboxRelay {
                 ORDER BY id
                 LIMIT ?
                 FOR UPDATE SKIP LOCKED
-                """, (rs, row) -> new PendingEvent(rs.getLong("id"), rs.getObject("aggregate_id", UUID.class),
-                rs.getString("topic"), rs.getString("payload"),
+                """, (rs, row) -> new PendingEvent(rs.getLong("id"), rs.getObject("event_id", UUID.class),
+                rs.getString("event_type"), rs.getObject("aggregate_id", UUID.class), rs.getString("topic"),
+                rs.getString("payload"), rs.getString("traceparent"), rs.getString("tracestate"),
                 now - (long) (rs.getDouble("age_seconds") * 1_000_000_000L)), batchSize);
     }
 
@@ -153,16 +158,26 @@ public class OutboxRelay {
     }
 
     private CompletableFuture<?> send(PendingEvent event) {
-        ProducerRecord<String, String> record = new ProducerRecord<>(event.topic(), event.aggregateId().toString(),
-                event.payload());
+        String key = event.aggregateId().toString();
+        ProducerRecord<String, String> record = new ProducerRecord<>(event.topic(), key, event.payload());
         record.headers().add(new RecordHeader(CONTENT_TYPE_HEADER,
                 CloudEvent.STRUCTURED_CONTENT_TYPE.getBytes(StandardCharsets.UTF_8)));
+        // Continues the trace of the request that wrote the event, and hands it on to the consumers in the headers.
+        Span span = tracing.startSend(event.topic(), key, event.eventId(), event.eventType(), event.traceparent(),
+                event.tracestate(), record.headers());
+        CompletableFuture<?> send;
         try {
-            return kafka.send(record);
+            send = kafka.send(record);
         } catch (RuntimeException e) {
             // e.g. metadata for the topic could not be fetched within max.block.ms
-            return CompletableFuture.failedFuture(e);
+            send = CompletableFuture.failedFuture(e);
         }
+        return send.whenComplete((result, failure) -> {
+            if (failure != null) {
+                span.error(failure);
+            }
+            span.end();
+        });
     }
 
     private void countAttempt(PendingEvent event, String outcome) {
@@ -193,6 +208,7 @@ public class OutboxRelay {
      * @param createdAtNanos when the event was written, on this JVM's {@link System#nanoTime()} scale. Its age is
      *                       measured with the database clock, so the clocks of the two hosts are never compared.
      */
-    private record PendingEvent(long id, UUID aggregateId, String topic, String payload, long createdAtNanos) {
+    private record PendingEvent(long id, UUID eventId, String eventType, UUID aggregateId, String topic, String payload,
+                                String traceparent, String tracestate, long createdAtNanos) {
     }
 }

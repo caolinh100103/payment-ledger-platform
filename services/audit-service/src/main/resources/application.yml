@@ -12,6 +12,9 @@ spring:
     password: ${AUDIT_DB_OWNER_PASSWORD:audit_owner}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    template:
+      # Forwards to the retry and dead-letter topics get a span of their own, in the same trace.
+      observation-enabled: true
     consumer:
       group-id: audit-service
       # A new audit consumer must see the whole history, not only what is published after it starts.
@@ -19,6 +22,9 @@ spring:
     listener:
       # Commit each offset right after its record was processed (and its database transaction committed).
       ack-mode: record
+      # Continue the trace in the record's traceparent header, written by the core's outbox relay: this service's
+      # spans and log lines join the trace of the request that caused the event.
+      observation-enabled: true
       # One consumer thread per partition of payledger.transfers.
       concurrency: 3
 
@@ -34,6 +40,21 @@ management:
     health:
       probes:
         enabled: true
+  tracing:
+    sampling:
+      # Every trace is kept here; production keeps a fraction or lets a collector choose (tail sampling).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Jaeger in infra/docker-compose.yml takes OTLP over HTTP.
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Prometheus scrapes /actuator/prometheus; the OpenTelemetry starter's OTLP metrics push stays off.
+        enabled: false
   metrics:
     tags:
       application: ${spring.application.name}

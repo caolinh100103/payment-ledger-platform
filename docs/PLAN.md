@@ -50,15 +50,19 @@ Dự án phải thể hiện được:
 | 21 | **Alert theo triệu chứng**, mỗi alert có **runbook** và **unit test `promtool`** chạy trong CI | Theo Google SRE: báo khi người dùng / kiểm toán bị ảnh hưởng, không báo theo CPU; alert không được test thì không biết có bắn hay không | [0013](adr/0013-metrics-and-alerting.md) |
 | 22 | **Trace id là correlation id** (OpenTelemetry, W3C Trace Context); trace đi **xuyên qua outbox** nhờ lưu `traceparent` trong CloudEvent (Distributed Tracing extension), relay tạo span con từ đó | Outbox là bảng DB nên trace bị đứt ở đó; Debezium làm tương tự với cột `tracingspancontext`; trace id còn nằm trong audit trail | [0014](adr/0014-trace-context-and-structured-logs.md) |
 | 23 | Mọi response có **`X-Trace-Id`** và **`x-fapi-interaction-id`** (FAPI, open banking); **log JSON theo ECS** có `trace.id` | Khách / ngân hàng đối tác báo một mã là tìm được cả chuỗi; log có cấu trúc thì tìm theo field, không grep | [0014](adr/0014-trace-context-and-structured-logs.md) |
+| 24 | Web app dùng **refresh token trong cookie `HttpOnly` + `SameSite=Strict`** (chỉ gửi tới `/api/v1/auth/browser/*`), **access token chỉ nằm trong bộ nhớ**; endpoint cookie bắt buộc header `X-Requested-With`; refresh giữa các tab được tuần tự hóa bằng **Web Locks API** | Mô hình *token-mediating backend* của draft IETF "OAuth 2.0 for Browser-Based Apps": XSS không lấy được credential sống lâu; hai tab refresh cùng lúc không bị nhầm là token bị đánh cắp | [0015](adr/0015-browser-sessions.md) |
+| 25 | Trình duyệt chỉ nói chuyện với **một origin** (Vite proxy khi dev, nginx khi deploy), không cấu hình CORS; nginx gửi **CSP chặt** | Không có CORS thì header tùy chỉnh đủ chặn CSRF; CSP hạn chế thiệt hại nếu có XSS | [0015](adr/0015-browser-sessions.md) |
+| 26 | **OpenAPI sinh từ code** (springdoc), bản sao commit ở `frontend/openapi/`, **contract test** ở mỗi service; **TypeScript types sinh từ đó** (openapi-typescript + openapi-fetch), CI kiểm tra types luôn mới | Đổi API mà quên frontend thì build fail, không phải khách hàng phát hiện | [0016](adr/0016-openapi-contract.md) |
+| 27 | Mọi lỗi (kể cả lỗi của Spring MVC) đều có `code`; lỗi validation liệt kê field trong **`invalidParams`** (theo ví dụ của RFC 9457) | Hợp đồng nói "lỗi nào cũng có `code`" thì phải đúng; form hiển thị lỗi cạnh từng field | [0016](adr/0016-openapi-contract.md) |
 
 ---
 
 ## 3. Kiến trúc
 
 ```
-React (TS) ─────────┐  Bearer access token (JWT ES256)
-Ngân hàng đối tác ──┤  X-API-Key (chỉ nạp tiền)
-                    ▼
+Web app (React + TS) ── nginx ──┐  một origin; access token trong bộ nhớ, refresh token trong cookie HttpOnly
+Ngân hàng đối tác ──────────────┤  X-API-Key (chỉ nạp tiền)
+                                ▼
             Core Service (Spring Boot, modular monolith)
             ├── security   đăng nhập, token, JWKS, RBAC, API key, rate limit ──► Redis
             ├── account
@@ -75,9 +79,10 @@ Ngân hàng đối tác ──┤  X-API-Key (chỉ nạp tiền)
                  log: JSON theo ECS, có trace.id
 ```
 
-**Tech stack:** Java 21 · Spring Boot 4.1 · Spring Security 7 · PostgreSQL 17 · Flyway · Kafka 4 (KRaft) ·
-Redis + Bucket4j · Micrometer + OpenTelemetry · Jaeger · kafka-exporter ·
-Testcontainers · Prometheus · Grafana · Docker Compose · GitHub Actions · React + TypeScript
+**Tech stack:** Java 21 · Spring Boot 4.1 · Spring Security 7 · springdoc-openapi · PostgreSQL 17 · Flyway ·
+Kafka 4 (KRaft) · Redis + Bucket4j · Micrometer + OpenTelemetry · Jaeger · kafka-exporter · Testcontainers ·
+Prometheus · Grafana · Docker Compose · nginx · k6 · GitHub Actions · React 19 + TypeScript (Vite, TanStack Query,
+React Router, openapi-fetch)
 
 ---
 
@@ -110,7 +115,11 @@ processed_events ((consumer, event_id) PK, processed_at)                        
 -- audit-service (database riêng)
 audit_events     (seq BIGINT PK không có khoảng trống, event_id UNIQUE, actor, action, resource_id,
                   occurred_at, source, payload TEXT, recorded_at, prev_hash, hash)                     -- ✅ Phase 3
+                                                       -- Phase 6: index (actor, seq) cho màn hình auditor
 ```
+
+Phase 6 không thêm bảng nào ở core: sao kê (`GET /accounts/{id}/ledger-entries`) đọc thẳng từ `ledger_entries` join
+`transfers`, phân trang bằng cursor trên index `(account_id, id)` có sẵn từ Phase 2.
 
 **Quy tắc bất biến:**
 
@@ -303,15 +312,59 @@ bằng OpenTelemetry Collector; đưa log vào Loki / Elasticsearch; postgres-ex
 outbox); công cụ replay DLT; metric cho audit chain (head, kết quả verify định kỳ); metric cho JDBC
 (datasource-micrometer); load test bằng k6 (Phase 6).
 
-### ⬜ Phase 6: Frontend & hoàn thiện
+### ✅ Phase 6: Frontend & hoàn thiện (hoàn thành 2026-10-03, trừ phần cần người dùng tự làm)
 
-- [ ] React + TS (Vite, TanStack Query)
-- [ ] Màn hình: đăng nhập, danh sách tài khoản, chuyển tiền, lịch sử giao dịch, audit (AUDITOR), admin
-- [ ] Sinh TypeScript types từ OpenAPI spec của backend
-- [ ] Tách CI thành `backend.yml` và `frontend.yml`, mỗi workflow có bộ lọc `paths:`
-- [ ] Load test bằng k6, đưa kết quả TPS và latency vào README
-- [ ] Deploy bản demo
-- [ ] Quay video demo 2–3 phút + chụp màn hình Grafana
+- [x] React 19 + TS (Vite, TanStack Query, React Router), client typed bằng `openapi-fetch`
+- [x] Màn hình: đăng nhập / mở hồ sơ, danh sách tài khoản + mở tài khoản, **sao kê** (cursor), chuyển tiền
+      (nhập → xác nhận → kết quả), chi tiết giao dịch, hộp SMS; operator: tra cứu khách theo username (mở khóa,
+      đóng băng tài khoản, SMS đã gửi), mở giao dịch theo mã và **hoàn tiền**; auditor: sự kiện mới nhất / theo actor,
+      toàn bộ lịch sử một resource, **kiểm tra chuỗi hash**; admin: tạo nhân viên, cấp / thu hồi API key
+- [x] Backend bổ sung cho frontend: `GET /accounts/{id}/ledger-entries` (sao kê), `GET /users?username=`,
+      `GET /audit-events/latest`, đăng nhập kiểu trình duyệt `/auth/browser/*` (refresh token trong cookie HttpOnly)
+- [x] Sinh TypeScript types từ OpenAPI: springdoc ở cả 3 service, bản sao commit ở `frontend/openapi/`,
+      `OpenApiContractTest` ở mỗi service, CI kiểm tra types luôn khớp
+- [x] Tách CI thành `backend.yml`, `frontend.yml` (và `infra.yml` cho Prometheus / Grafana / compose), mỗi workflow
+      có bộ lọc `paths:`
+- [x] Load test bằng k6, kết quả và phân tích ở [loadtest/README.md](../loadtest/README.md), tóm tắt trong README
+- [x] Đóng gói để deploy: Dockerfile cho 3 service (layered jar, user không phải root) và web (nginx + CSP), profile
+      `app` trong docker compose, [scripts/seed-demo.sh](../scripts/seed-demo.sh); đã chạy toàn bộ stack bằng Docker
+- [x] Chụp màn hình giao diện và Grafana ([docs/screenshots](screenshots))
+- [ ] Deploy lên một host public (cần tài khoản cloud / VPS và tên miền để có HTTPS)
+- [ ] Quay video demo 2–3 phút
+
+**Kết quả:** 289 test backend (core 230, audit-service 33, notification-service 26) + 19 test frontend (theo yêu cầu,
+frontend chỉ có test cho phần logic: phiên đăng nhập, client API, tiền tệ). Giao diện được kiểm tra bằng Playwright
+trên stack Docker thật: đăng nhập, reload vẫn giữ phiên, **hai tab refresh cùng lúc không bị thu hồi phiên**, chuyển
+tiền, chặn số tiền vượt số dư, các màn hình operator / auditor / admin, màn hình điện thoại.
+
+Load test trên laptop (i7-11800H, Docker Desktop, 13 container + k6 cùng một máy): ~250 giao dịch/s, median 10–20 ms;
+sau 108.847 giao dịch mọi bất biến sổ cái vẫn đúng, chuỗi audit 219.651 bản ghi hợp lệ. Đuôi độ trễ (p95/p99 tới
+vài giây) do **fsync của ổ ảo Docker Desktop**, chứng minh bằng lần chạy chẩn đoán `synchronous_commit = off`
+(p95 951 ms → 71 ms) và `pg_test_fsync`.
+
+**Bài học / phát hiện khi làm:**
+- springdoc coi field kiểu nguyên thủy (`long amount`) là không bắt buộc và mọi field của response đều optional; phải
+  thêm customizer đánh dấu `required` cho response và `@Schema(nullable = true)` cho field có thể null, nếu không types
+  sinh ra toàn `?:`.
+- Lỗi của chính Spring MVC (JSON hỏng, validation, sai method) không có `code`. `handleExceptionInternal` nhận body
+  `null`, phải xử lý **sau** khi lớp cha tạo ProblemDetail.
+- Spring Boot map biến môi trường bằng relaxed binding: `payledger.rate-limit.enabled` là `PAYLEDGER_RATELIMIT_ENABLED`,
+  không phải `PAYLEDGER_RATE_LIMIT_ENABLED`.
+- `docker compose` nội suy biến cho cả file, kể cả service thuộc profile không bật: `${VAR:?}` làm hỏng
+  `docker compose up` của hạ tầng.
+- Build 3 image song song dùng chung cache Maven thì Maven wrapper bị tải đè nhau; cần `sharing=locked`.
+- Đăng xuất rồi người khác đăng nhập trên cùng trình duyệt thì không được đưa về trang cuối của người trước: chỉ nhớ
+  trang cũ khi phiên **tự hết hạn** (phát hiện nhờ Playwright: auditor bị đưa vào trang của operator).
+- Refresh token xoay vòng + phát hiện dùng lại sẽ **thu hồi phiên khi hai tab refresh cùng lúc**; giải bằng Web Locks
+  API thay vì nới lỏng phía server.
+- Pool kết nối lớn hơn (10 → 30) không làm nhanh hơn mà còn gây `LOCK_TIMEOUT` ở tài khoản nóng.
+- Relay outbox của một instance đạt ~470 event/s, audit service (chuỗi hash tuần tự) ~350 event/s: dưới tải cao,
+  event bị trễ (backlog 17.000, trễ 63 s) nhưng **thanh toán không bị ảnh hưởng**, sau đó tự đuổi kịp.
+
+**Để dành cho sau:** BFF thật sự (không token nào tới trình duyệt); tra cứu tên người nhận trước khi chuyển (như
+Napas 247); giao diện tiếng Việt (i18n); thông báo phiên sắp hết hạn; e2e test bằng Playwright trong CI; audit ghi
+nối chuỗi theo lô (batch) để vượt ~350 event/s; nhiều instance core để tăng throughput relay; load test trên máy Linux
+có NVMe; Kubernetes manifest / Helm chart.
 
 ### Mở rộng (nếu còn thời gian)
 
@@ -331,7 +384,8 @@ payment-ledger-platform/
 ├── backend/        # Core service (Spring Boot)
 ├── services/       # audit-service, notification-service (mỗi service một DB, một Maven project)
 ├── scripts/        # demo scripts
-├── frontend/       # Phase 6: React + TS
+├── frontend/       # React + TS web app; openapi/ giữ bản sao OpenAPI của 3 service
+├── loadtest/       # k6 load test và kết quả
 ├── infra/          # docker-compose, Prometheus, Grafana
 ├── docs/           # PLAN.md, ADR
 └── .github/workflows/
@@ -371,7 +425,12 @@ fix/transfer-deadlock
 7. **Observability** (`scripts/demo-observability.sh`): một giao dịch trả về `X-Trace-Id`; cùng trace id đó có trong
    outbox, trong Jaeger (core → relay → audit + notification) và trong audit trail. Sau đó xem trên Grafana: p99,
    giao dịch bị từ chối theo lý do, replay idempotency, lag; bấm vào exemplar để mở trace của một request chậm.
-   (Phase 6: load test bằng k6.)
+8. **Web app** (`docker compose --profile app up`, `scripts/seed-demo.sh`, http://localhost:8088): alice chuyển tiền,
+   bấm "Confirm" hai lần hoặc tắt mạng rồi "Try again" thì vẫn chỉ trừ tiền một lần (cùng Idempotency-Key); bob nhận
+   SMS; operator tìm alice và hoàn giao dịch; auditor xem lịch sử giao dịch đó và kiểm tra chuỗi hash. Mở hai tab,
+   reload cùng lúc: vẫn đăng nhập (Web Locks). Lỗi nào cũng có mã tham chiếu = trace id để tìm trong Jaeger.
+9. **Load test** ([loadtest/README.md](../loadtest/README.md)): chạy k6, xem Grafana trong lúc chạy, sau đó chạy SQL
+   kiểm tra bất biến sổ cái và giải thích vì sao đuôi độ trễ trên laptop là do ổ đĩa, không phải do code.
 
 ---
 
@@ -403,3 +462,10 @@ fix/transfer-deadlock
 - Trace bị đứt ở đâu trong outbox pattern, và nối lại thế nào? Parent hay link?
 - Alert nên dựa vào triệu chứng hay nguyên nhân? Làm sao test một alert rule?
 - Vì sao trả về cả `X-Trace-Id` và `x-fapi-interaction-id`? Khác nhau thế nào?
+- SPA nên giữ token ở đâu? localStorage, bộ nhớ, cookie HttpOnly hay BFF khác nhau thế nào khi bị XSS?
+- Cookie thì phải chống CSRF; `SameSite=Strict` và header tùy chỉnh chặn được gì? Vì sao không cần CORS?
+- Hai tab cùng refresh với refresh token xoay vòng thì chuyện gì xảy ra, và giải quyết thế nào?
+- Code first hay contract first cho OpenAPI? Làm sao biết frontend không lệch khỏi backend?
+- Idempotency-Key nên sinh ở đâu trên giao diện? Khi nào giữ key cũ, khi nào tạo key mới?
+- Load test cho thấy p50 thấp nhưng p99 rất cao: tìm nguyên nhân thế nào? Vì sao tăng connection pool không giúp?
+- Vì sao không được tắt `synchronous_commit` trong hệ thống ngân hàng, dù nó nhanh hơn nhiều?

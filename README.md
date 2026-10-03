@@ -3,16 +3,16 @@
 A banking-oriented payment platform: accounts, money transfers with a double-entry ledger,
 idempotent APIs, concurrency-safe balance updates, and event-driven downstream processing.
 
-> Status: **Phase 5 – Observability** done (business metrics counted after commit, one OpenTelemetry trace from the
-> HTTP request through the outbox to both consumers, JSON logs in Elastic Common Schema, consumer lag from the broker,
-> tested alert rules with a runbook, Grafana dashboards as code). Next: Phase 6 – frontend and polish.
+> Status: **Phase 6 – Frontend & polish** done: a React web app for customers, operators, auditors and admins, typed
+> from the services' OpenAPI documents; browser sessions with the refresh token in an HttpOnly cookie; account
+> statements; the whole stack in Docker; a k6 load test. See the [plan](docs/PLAN.md) for what comes next.
 
 ## Architecture
 
 ```
-React (TS) ─────────┐  Bearer access token (ES256 JWT)
-Partner bank ───────┤  X-API-Key (deposits only)
-                    ▼
+Web app (React + TS) ── nginx ──┐  one origin; Bearer access token (ES256 JWT), refresh token in an HttpOnly cookie
+Partner bank ───────────────────┤  X-API-Key (deposits only)
+                                ▼
             Core Service (Spring Boot, modular monolith)
             ├── security   ✅ sign-in, tokens, JWKS, RBAC, API keys, rate limit ──► Redis (token buckets)
             ├── account    ✅
@@ -48,19 +48,42 @@ Key design decisions are recorded in [docs/adr](docs/adr):
 | [0012](docs/adr/0012-rate-limiting.md) | Token-bucket rate limiting in Redis, failing open |
 | [0013](docs/adr/0013-metrics-and-alerting.md) | Business metrics counted after commit, consumer lag from the broker, symptom-based alerts |
 | [0014](docs/adr/0014-trace-context-and-structured-logs.md) | One trace through the outbox (CloudEvents `traceparent`), `X-Trace-Id` and FAPI interaction id, ECS JSON logs |
+| [0015](docs/adr/0015-browser-sessions.md) | Browser sessions: refresh token in an HttpOnly `SameSite=Strict` cookie, access token in memory, Web Locks across tabs |
+| [0016](docs/adr/0016-openapi-contract.md) | OpenAPI generated from the code, committed and contract-tested, TypeScript client types generated from it |
 
 The event contract is documented in [docs/events.md](docs/events.md); what to do when an alert fires, in
 [docs/runbook.md](docs/runbook.md).
 
 ## Tech stack
 
-Java 21 · Spring Boot 4.1 · Spring Security 7 (OAuth 2.0 resource server, Nimbus JOSE) · PostgreSQL 17 · Flyway ·
-Kafka 4 (KRaft) · Redis + Bucket4j · Micrometer + OpenTelemetry · Prometheus · Grafana · Jaeger · kafka-exporter ·
-Testcontainers · Docker Compose · GitHub Actions
+**Backend:** Java 21 · Spring Boot 4.1 · Spring Security 7 (OAuth 2.0 resource server, Nimbus JOSE) · springdoc-openapi ·
+PostgreSQL 17 · Flyway · Kafka 4 (KRaft) · Redis + Bucket4j · Micrometer + OpenTelemetry · Testcontainers
+
+**Frontend:** React 19 · TypeScript · Vite · TanStack Query · React Router · openapi-typescript + openapi-fetch · Vitest
+
+**Operations:** Docker Compose · nginx · Prometheus · Grafana · Jaeger · kafka-exporter · k6 · GitHub Actions
 
 ## Getting started
 
-Prerequisites: JDK 21, Docker.
+### Everything in Docker
+
+Prerequisites: Docker only.
+
+```bash
+cd infra
+echo "PAYLEDGER_ADMIN_PASSWORD=choose a passphrase of 15+ chars" > .env   # the first ADMIN; .env is git-ignored
+docker compose --profile app up -d --build --wait
+PAYLEDGER_ADMIN_PASSWORD='choose a passphrase of 15+ chars' ../scripts/seed-demo.sh
+```
+
+Then open **http://localhost:8088** and sign in as `alice` or `bob` (customers), `operator`, `auditor`
+(password `correct horse battery staple`) or `admin`. The `app` profile builds the three services and the web app
+(nginx serving the app and proxying `/api` to the services) on top of the infrastructure below; without it, only the
+infrastructure starts.
+
+### Developing
+
+Prerequisites: JDK 21, Node.js 22, Docker.
 
 ```bash
 # 1. Start infrastructure
@@ -74,11 +97,16 @@ PAYLEDGER_ADMIN_PASSWORD='dev-only bootstrap passphrase' ./mvnw spring-boot:run
 # 3. (Optional) Run the consumers, each in its own terminal
 cd ../services/audit-service && ./mvnw spring-boot:run
 cd ../services/notification-service && ./mvnw spring-boot:run
+
+# 4. The web app on http://localhost:5173, proxying /api to the services above
+cd ../../frontend && npm ci && npm run dev
 ```
 
 | Service     | URL                                  | Notes                       |
 |-------------|--------------------------------------|-----------------------------|
+| Web app     | http://localhost:8088 (Docker), http://localhost:5173 (`npm run dev`) | |
 | Core API    | http://localhost:8080/api/v1         | Sign in as `admin` with the password above |
+| API reference | http://localhost:{8080,8082,8083}/swagger-ui.html | OpenAPI 3.1 at `/v3/api-docs` |
 | JWKS        | http://localhost:8080/.well-known/jwks.json | Public keys the other services verify tokens with |
 | Audit API   | http://localhost:8082/api/v1/audit-events |                        |
 | Notifications API | http://localhost:8083/api/v1/notifications |                 |
@@ -103,6 +131,41 @@ startup and logs a warning: tokens then die with the process. Fine locally, not 
 Logs are JSON lines (Elastic Common Schema). For plain text in a terminal, start a service with `LOG_FORMAT=`
 (empty), e.g. `LOG_FORMAT= ./mvnw spring-boot:run`.
 
+## Web app
+
+One single-page app (React, TypeScript, [frontend/](frontend)) for everyone; what it shows depends on the role in
+the access token. The server authorizes every request on its own, so a hidden screen is a convenience, not a guard.
+
+| Role | Screens |
+|---|---|
+| Customer | Accounts and balances, opening an account · a statement per account (newest first, cursor-paged) · sending money (form → review → confirm) · a payment's details · the balance-change SMS received |
+| Operator | Find a customer by username: profile, lockout and unlock, accounts with freeze / unfreeze, the SMS sent · open any payment by its reference and reverse it |
+| Auditor | The latest events, or one actor's · the full story of one transfer, account, user or key · verify the hash chain |
+| Admin | Create staff users · issue API keys (shown once) and revoke them · plus the operator and auditor screens |
+
+| Statement | Money sent (idempotent) | Support desk | Audit trail |
+|---|---|---|---|
+| [![Statement](docs/screenshots/statement.png)](docs/screenshots/statement.png) | [![Money sent](docs/screenshots/money-sent.png)](docs/screenshots/money-sent.png) | [![Support desk](docs/screenshots/support-desk.png)](docs/screenshots/support-desk.png) | [![Audit trail](docs/screenshots/audit-trail.png)](docs/screenshots/audit-trail.png) |
+
+Also: [a customer's accounts](docs/screenshots/accounts.png), [on a phone](docs/screenshots/mobile.png).
+
+- **Sessions without a stealable credential.** The refresh token lives in an `HttpOnly`, `SameSite=Strict` cookie
+  scoped to `/api/v1/auth/browser`; the 5-minute access token only in memory. Refreshes are serialised across tabs
+  with the Web Locks API, so two tabs never trip refresh-token reuse detection. Sign-out reaches every tab. nginx sends
+  a strict Content Security Policy ([ADR 0015](docs/adr/0015-browser-sessions.md)).
+- **Idempotent from the click.** The `Idempotency-Key` of a payment is created when the customer reaches the
+  confirmation step and kept for every attempt: a double click, or "Try again" after a timeout or a `503 LOCK_TIMEOUT`,
+  sends the same key, and the server replays the first outcome instead of paying twice. The app says so when a
+  response was a replay. Editing the payment starts over with a new key.
+- **Errors a bank would show.** A plain sentence per problem `code`, the server's detail, the fields that failed
+  validation, and a **reference**: the response's `X-Trace-Id`, which support can paste into Jaeger, the logs or the
+  audit trail.
+- **Typed by the API itself.** The TypeScript types are generated from the services' OpenAPI documents, which the
+  backend's contract tests keep equal to the code; an API change that the app does not follow fails the build
+  ([ADR 0016](docs/adr/0016-openapi-contract.md)).
+- **Money as text.** Amounts are integers in minor units end to end; what a person types is parsed digit by digit
+  (`0.29` USD is 29 cents, not 28.999…), and an extra decimal is refused, never rounded.
+
 ## API
 
 Every endpoint except sign-up, sign-in, refresh, sign-out, the JWKS and the probes needs credentials: a bearer
@@ -119,6 +182,7 @@ back, as in FAPI / open banking, or a new one). A client may send a W3C `tracepa
 | POST   | `/api/v1/auth/login`       | anyone | Access token (5 min) + refresh token |
 | POST   | `/api/v1/auth/refresh`     | anyone with a refresh token | New access token and new refresh token; the old one stops working |
 | POST   | `/api/v1/auth/logout`      | anyone with a refresh token | End the session; always `204` |
+| POST   | `/api/v1/auth/browser/login`, `/refresh`, `/logout` | the web app | The same, with the refresh token in an HttpOnly cookie instead of the body; require `X-Requested-With` ([ADR 0015](docs/adr/0015-browser-sessions.md)) |
 | GET    | `/.well-known/jwks.json`   | anyone | Public signing keys (RFC 7517) |
 
 ```bash
@@ -134,6 +198,7 @@ curl -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json
 |--------|---------------------------------|--------|-------------|
 | GET    | `/api/v1/users/me`              | any user | The signed-in user |
 | POST   | `/api/v1/users`                 | ADMIN | Create a user with any role (staff) |
+| GET    | `/api/v1/users?username=`       | OPERATOR | Find a user by exact username (support desk) |
 | GET    | `/api/v1/users/{id}`            | OPERATOR | Look a user up, including a lockout |
 | POST   | `/api/v1/users/{id}/unlock`     | OPERATOR | Lift a sign-in lockout |
 | POST   | `/api/v1/api-keys`              | ADMIN | Issue a key (`name`, `scopes`, optional `expiresAt`); the key is shown only in this response |
@@ -148,6 +213,7 @@ curl -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json
 | GET    | `/api/v1/accounts/{id}`              | own, OPERATOR | Account and balance |
 | GET    | `/api/v1/accounts`                   | CUSTOMER | The caller's accounts |
 | GET    | `/api/v1/accounts?ownerId=`          | OPERATOR | A customer's accounts |
+| GET    | `/api/v1/accounts/{id}/ledger-entries?limit=&startingAfter=` | own, OPERATOR | Statement: ledger entries newest first, each with its movement, counterparty and balance after; cursor-paged like Stripe lists |
 | POST   | `/api/v1/accounts/{id}/freeze`       | OPERATOR | ACTIVE → FROZEN |
 | POST   | `/api/v1/accounts/{id}/unfreeze`     | OPERATOR | FROZEN → ACTIVE |
 | POST   | `/api/v1/accounts/{id}/close`        | own, OPERATOR | → CLOSED (balance must be zero) |
@@ -208,6 +274,11 @@ Security errors use the same format:
 | `ACCESS_DENIED` | 403 | The caller's role does not allow this operation |
 | `RESOURCE_NOT_FOUND` | 404 | Also for someone else's account or transfer, so ids cannot be probed |
 | `RATE_LIMITED` | 429 | Too many requests; see `Retry-After` |
+| `CSRF_CHECK_FAILED` | 403 | A browser session request without `X-Requested-With` |
+
+Spring's own errors carry a code too: `INVALID_REQUEST` (400, with the offending fields in `invalidParams`),
+`RESOURCE_NOT_FOUND`, `METHOD_NOT_ALLOWED` and so on. The full contract of each service is its OpenAPI document
+(`/v3/api-docs`, Swagger UI at `/swagger-ui.html`), committed in [frontend/openapi](frontend/openapi).
 
 ### Idempotency
 
@@ -225,6 +296,7 @@ Keys are scoped to the caller: two clients picking the same key never see each o
 | Method | Path                                         | Service | Access | Description |
 |--------|----------------------------------------------|---------|--------|-------------|
 | GET    | `/api/v1/audit-events?resourceId=`           | audit (8082) | AUDITOR | The trail of a transfer, account, user or API key, oldest first |
+| GET    | `/api/v1/audit-events/latest?actor=&beforeSeq=` | audit (8082) | AUDITOR | The latest events, newest first, optionally of one actor; paged by `seq` |
 | GET    | `/api/v1/audit-events/verification`          | audit (8082) | AUDITOR | Re-hash the whole chain; reports the first altered or missing record |
 | GET    | `/api/v1/notifications`                      | notification (8083) | CUSTOMER | The caller's messages, newest first |
 | GET    | `/api/v1/notifications?recipientId=`         | notification (8083) | OPERATOR | A customer's messages |
@@ -330,9 +402,11 @@ cd backend
 ```
 
 Each service builds and tests on its own (`./mvnw verify` in `backend`, `services/audit-service` and
-`services/notification-service`). CI runs all three in parallel, plus a job that checks the Prometheus config and
-unit-tests the alert rules with `promtool`. There are 263 tests: 210 in the core, 28 in the audit service and 25 in
-the notification service. Integration tests run against a real PostgreSQL, a real
+`services/notification-service`; `npm test` in `frontend`). CI has one workflow per part, each started only by
+changes to its own paths: **Backend** (the three services in parallel), **Frontend** (generated types up to date,
+lint, type check, tests, build, nginx config) and **Infrastructure** (Prometheus config, `promtool` tests of the
+alert rules, dashboards, compose file). There are 289 backend tests: 230 in the core, 33 in the audit service and 26
+in the notification service, plus 19 in the frontend. Integration tests run against a real PostgreSQL, a real
 Kafka broker and a real Redis in Docker (Testcontainers), because locking, constraint and delivery behaviour cannot
 be verified with in-memory fakes. Requests go through the real security filters with real signed tokens.
 Highlights:
@@ -369,6 +443,13 @@ Highlights:
   log line back as JSON.
 - `infra/prometheus/alerts.test.yml`: an old outbox backlog pages after 2 minutes, a single deadlock or audit gap at
   once; retry topics are not lag and 422 rejections are not errors.
+- `BrowserSessionApiIntegrationTest` checks the cookie's attributes, its rotation, that a replayed cookie ends the
+  session, and that none of the three browser endpoints acts without the anti-CSRF header.
+- `OpenApiContractTest` (one per service) fails when the API and the OpenAPI copy the web app is typed against
+  disagree. `AccountStatementApiIntegrationTest` pages through a statement while new entries are posted.
+- In the frontend, `session.test.ts` checks that simultaneous callers share one refresh, that it runs under the
+  cross-tab lock, and that a network failure does not sign anyone out; `money.test.ts` that amounts never go through
+  floating point.
 
 Several of these were checked by breaking the code on purpose: without the relay's ordering guard, the audit
 chain lock, the `processed_events` check, the row lock on sign-in, the trace stamp in the outbox, or with transfers
@@ -397,6 +478,26 @@ victim's security trail in the audit service. The third makes a payment and foll
 through Jaeger across the three services and into the audit trail, then sends a burst of payments, rejections and
 retries and prints what Prometheus measured.
 
+## Load test
+
+A k6 test ([loadtest/](loadtest)) drives `POST /api/v1/transfers` at a constant arrival rate against the whole stack in
+Docker on one laptop, with the relay, Kafka and both consumers working at the same time. Highlights from
+[the report](loadtest/README.md):
+
+| Run (300/s offered across 100 accounts, then 100/s into one) | Spread: transfers/s · p50 · p95 | Hot account: transfers/s · p50 · p95 |
+|---|---|---|
+| Defaults | 250 · 19 ms · 951 ms | 70 · 1.5 s · 12.5 s |
+| *Diagnostic:* `synchronous_commit = off` | 283 · 10 ms · 71 ms | 100 · 8 ms · 632 ms |
+
+- Every transfer that was sent completed or was refused with a retryable `503`; after 108,847 transfers every ledger
+  invariant held and the audit chain of 219,651 records verified.
+- The median is the application (10–20 ms per transaction). The tail is the laptop's virtual disk: commits wait for
+  the WAL flush, which Docker Desktop sometimes takes seconds to do (`pg_test_fsync`: up to 964 ms per `fsync`).
+  Turning off synchronous commit for one run, never an option for a bank, cut p95 from 951 ms to 71 ms.
+- 30 connections instead of 10 moved the queue into PostgreSQL and caused lock timeouts on the hot account.
+- The outbox absorbed the difference between payments (~570 events/s) and one relay (~470 events/s); the backlog
+  peaked at 17,000 events and drained in about a minute, while the payments themselves never waited for Kafka.
+
 ## Roadmap
 
 - [x] **Phase 1 – Foundation:** infrastructure, account API, Flyway, Testcontainers, CI
@@ -404,4 +505,5 @@ retries and prints what Prometheus measured.
 - [x] **Phase 3 – Events:** transactional outbox, Kafka events, audit & notification consumers, DLQ
 - [x] **Phase 4 – Security:** JWT, refresh tokens, RBAC, API keys, rate limiting, security audit events
 - [x] **Phase 5 – Observability:** business metrics, tracing through the outbox, JSON logs, consumer lag, alerts, dashboards
-- [ ] **Phase 6 – Frontend & polish:** React UI, k6 load tests, deployment
+- [x] **Phase 6 – Frontend & polish:** React web app typed from OpenAPI, browser sessions, statements, Docker images
+  and a one-command stack, k6 load test, CI per part of the monorepo

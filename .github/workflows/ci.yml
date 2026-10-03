@@ -6,11 +6,23 @@ on:
   pull_request:
 
 jobs:
-  backend:
+  build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      # One failing service should not hide the results of the others.
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            path: backend
+          - name: audit-service
+            path: services/audit-service
+          - name: notification-service
+            path: services/notification-service
     defaults:
       run:
-        working-directory: backend
+        working-directory: ${{ matrix.path }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,8 +31,9 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          cache-dependency-path: ${{ matrix.path }}/pom.xml
 
-      # Integration tests start PostgreSQL via Testcontainers using the runner's Docker daemon.
+      # Integration tests start PostgreSQL and Kafka via Testcontainers using the runner's Docker daemon.
       - name: Build and test
         run: ./mvnw -B verify
 
@@ -28,5 +41,5 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports
-          path: backend/target/surefire-reports
+          name: surefire-reports-${{ matrix.name }}
+          path: ${{ matrix.path }}/target/surefire-reports

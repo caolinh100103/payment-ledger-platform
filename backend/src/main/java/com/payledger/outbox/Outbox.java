@@ -35,13 +35,17 @@ public class Outbox {
      *
      * <p>The event is stamped with the current trace context (see {@link OutboxTracing}), so its publication and
      * consumption join the trace of the request that caused it.
+     *
+     * <p>{@code created_at} is the moment of this insert, near the end of the transaction, not the column default
+     * {@code now()}, which is the start of the transaction: the delivery delay and the backlog age must not include
+     * the time a transfer waited for its account locks.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void append(String topic, String aggregateType, UUID aggregateId, CloudEvent<?> event) {
         CloudEvent<?> traced = tracing.stamp(event);
         jdbc.update("""
-                INSERT INTO outbox (event_id, aggregate_type, aggregate_id, event_type, topic, payload)
-                VALUES (?, ?, ?, ?, ?, ?::json)
+                INSERT INTO outbox (event_id, aggregate_type, aggregate_id, event_type, topic, payload, created_at)
+                VALUES (?, ?, ?, ?, ?, ?::json, clock_timestamp())
                 """, traced.id(), aggregateType, aggregateId, traced.type(), topic, jsonMapper.writeValueAsString(traced));
     }
 }

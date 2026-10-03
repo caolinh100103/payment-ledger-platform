@@ -28,6 +28,10 @@ import java.time.Duration;
  *
  * <p>Tags have a fixed, small set of values (types, statuses, failure codes, currencies). Account or user ids are
  * never tags: every distinct value creates a time series in Prometheus.
+ *
+ * <p>Every outcome is registered at zero on startup. A counter that only appears at its first increment shows up in
+ * Prometheus already at 1, and {@code increase()} sees no change: the first rejection of a kind would be invisible,
+ * and an alert on "any increase" would never fire for a single event.
  */
 @Component
 class TransferMetrics {
@@ -39,6 +43,12 @@ class TransferMetrics {
 
     TransferMetrics(MeterRegistry meters) {
         this.meters = meters;
+        for (TransferType type : TransferType.values()) {
+            transfers(type.name(), TransferStatus.COMPLETED.name(), NO_FAILURE);
+            for (String code : TransferRules.FAILURE_CODES) {
+                transfers(type.name(), TransferStatus.FAILED.name(), code);
+            }
+        }
     }
 
     /** Must be called inside the transaction that records {@code transfer}, once its outcome is decided. */
@@ -56,11 +66,7 @@ class TransferMetrics {
         String status = transfer.getStatus().name();
         String failureCode = transfer.getFailureCode() == null ? NO_FAILURE : transfer.getFailureCode();
 
-        Counter.builder("payledger.transfers")
-                .description("Money movements recorded, by outcome")
-                .tags("type", type, "status", status, "failure.code", failureCode)
-                .register(meters)
-                .increment();
+        transfers(type, status, failureCode).increment();
         if (transfer.getStatus() == TransferStatus.COMPLETED) {
             Counter.builder("payledger.transfers.amount")
                     .description("Money moved by completed movements, in the minor unit of the currency")
@@ -92,5 +98,12 @@ class TransferMetrics {
             line = line.addKeyValue("transfer.failure_code", transfer.getFailureCode());
         }
         line.log();
+    }
+
+    private Counter transfers(String type, String status, String failureCode) {
+        return Counter.builder("payledger.transfers")
+                .description("Money movements recorded, by outcome")
+                .tags("type", type, "status", status, "failure.code", failureCode)
+                .register(meters);
     }
 }

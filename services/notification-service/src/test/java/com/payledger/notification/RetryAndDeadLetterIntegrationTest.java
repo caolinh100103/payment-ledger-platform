@@ -34,6 +34,11 @@ class RetryAndDeadLetterIntegrationTest extends ConsumerTestSupport {
     }
 
     @Test
+    void deadLetterCounterStartsAtZeroSoTheFirstParkedEventAlerts() {
+        assertThat(meters.find("payledger.events.dead.lettered").tag("topic", TOPIC).counter()).isNotNull();
+    }
+
+    @Test
     void eventThatKeepsFailingIsParkedOnTheDeadLetterTopic() throws Exception {
         UUID eventId = UUID.randomUUID();
         doThrow(new IllegalStateException("SMS gateway down"))

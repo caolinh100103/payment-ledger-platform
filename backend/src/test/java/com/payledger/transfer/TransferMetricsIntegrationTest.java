@@ -65,6 +65,19 @@ class TransferMetricsIntegrationTest extends ApiTestSupport {
     }
 
     @Test
+    void registersEveryOutcomeAtZeroSoTheFirstOneShowsAsAnIncrease() {
+        for (TransferType type : TransferType.values()) {
+            assertThat(meters.find("payledger.transfers").tags("type", type.name(), "status", "FAILED",
+                    "failure.code", "CURRENCY_MISMATCH").counter()).isNotNull();
+        }
+        assertThat(meters.find("payledger.lock.failures").tag("reason", "deadlock").counter()).isNotNull();
+        assertThat(meters.find("payledger.rate.limit.requests").tags("policy", "api-key", "outcome", "bypassed")
+                .counter()).isNotNull();
+        assertThat(meters.find("payledger.outbox.publish.attempts").tags("topic", "payledger.security",
+                "outcome", "failed").counter()).isNotNull();
+    }
+
+    @Test
     void doesNotCountAMovementWhoseTransactionRolledBack() {
         Transfer transfer = Transfer.transfer(UUID.randomUUID(), UUID.randomUUID(), 1_000, "EUR", null, "user:test");
         transfer.complete();

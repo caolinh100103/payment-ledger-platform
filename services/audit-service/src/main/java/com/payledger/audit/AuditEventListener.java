@@ -5,6 +5,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.BackOff;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -39,10 +40,17 @@ class AuditEventListener {
     private final JsonMapper json;
     private final MeterRegistry meters;
 
-    AuditEventListener(AuditLog auditLog, JsonMapper json, MeterRegistry meters) {
+    AuditEventListener(AuditLog auditLog, JsonMapper json, MeterRegistry meters,
+                       @Value("${payledger.audit.topics}") String[] topics) {
         this.auditLog = auditLog;
         this.json = json;
         this.meters = meters;
+        // From zero: a counter born at 1 shows no increase, and the AUDIT GAP alert would miss a single parked event.
+        meters.counter("payledger.events.consumed", "outcome", "processed");
+        meters.counter("payledger.events.consumed", "outcome", "duplicate");
+        for (String topic : topics) {
+            meters.counter("payledger.events.dead.lettered", "topic", topic.trim());
+        }
     }
 
     @RetryableTopic(

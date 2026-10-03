@@ -100,6 +100,13 @@ class AuditEventListenerIntegrationTest {
         assertThat(consumed("duplicate")).isEqualTo(duplicates + 1);
     }
 
+    @Test
+    void deadLetterCountersStartAtZeroSoTheFirstParkedEventAlerts() {
+        for (String topic : List.of("payledger.transfers", "payledger.accounts", "payledger.security")) {
+            assertThat(meters.find("payledger.events.dead.lettered").tag("topic", topic).counter()).isNotNull();
+        }
+    }
+
     private double consumed(String outcome) {
         Counter counter = meters.find("payledger.events.consumed").tag("outcome", outcome).counter();
         return counter == null ? 0 : counter.count();

@@ -75,6 +75,12 @@ public class RateLimiter implements DisposableBean {
                 .socketOptions(SocketOptions.builder().connectTimeout(timeout).build())
                 .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
                 .build());
+        // From zero, so the first request let through unchecked is an increase that alerts, not a new series.
+        for (String policy : new String[]{"user", "api-key", "anonymous"}) {
+            for (String outcome : new String[]{"allowed", "rejected", "bypassed"}) {
+                meters.counter("payledger.rate.limit.requests", "policy", policy, "outcome", outcome);
+            }
+        }
     }
 
     /**

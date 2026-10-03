@@ -4,6 +4,7 @@ import com.payledger.account.Account;
 import com.payledger.account.AccountStatus;
 import com.payledger.account.AccountType;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -15,6 +16,16 @@ import java.util.Optional;
  */
 final class TransferRules {
 
+    static final String ACCOUNT_TYPE_NOT_ALLOWED = "ACCOUNT_TYPE_NOT_ALLOWED";
+    static final String SOURCE_ACCOUNT_NOT_ACTIVE = "SOURCE_ACCOUNT_NOT_ACTIVE";
+    static final String DESTINATION_ACCOUNT_NOT_ACTIVE = "DESTINATION_ACCOUNT_NOT_ACTIVE";
+    static final String CURRENCY_MISMATCH = "CURRENCY_MISMATCH";
+    static final String INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS";
+
+    /** Every code a rejection can carry. */
+    static final List<String> FAILURE_CODES = List.of(ACCOUNT_TYPE_NOT_ALLOWED, SOURCE_ACCOUNT_NOT_ACTIVE,
+            DESTINATION_ACCOUNT_NOT_ACTIVE, CURRENCY_MISMATCH, INSUFFICIENT_FUNDS);
+
     record Rejection(String code, String reason) {
     }
 
@@ -23,8 +34,8 @@ final class TransferRules {
 
     static Optional<Rejection> check(Transfer transfer, Account source, Account destination) {
         return checkTypes(transfer, source, destination)
-                .or(() -> checkStatus(transfer, source, "SOURCE_ACCOUNT_NOT_ACTIVE"))
-                .or(() -> checkStatus(transfer, destination, "DESTINATION_ACCOUNT_NOT_ACTIVE"))
+                .or(() -> checkStatus(transfer, source, SOURCE_ACCOUNT_NOT_ACTIVE))
+                .or(() -> checkStatus(transfer, destination, DESTINATION_ACCOUNT_NOT_ACTIVE))
                 .or(() -> checkCurrency(transfer, source))
                 .or(() -> checkCurrency(transfer, destination))
                 .or(() -> checkFunds(transfer, source));
@@ -38,7 +49,7 @@ final class TransferRules {
             // Mirrors a movement that already passed these checks.
             case REVERSAL -> true;
         };
-        return allowed ? Optional.empty() : Optional.of(new Rejection("ACCOUNT_TYPE_NOT_ALLOWED",
+        return allowed ? Optional.empty() : Optional.of(new Rejection(ACCOUNT_TYPE_NOT_ALLOWED,
                 transfer.getType() + " is not allowed between a " + source.getType()
                         + " and a " + destination.getType() + " account"));
     }
@@ -57,13 +68,13 @@ final class TransferRules {
 
     private static Optional<Rejection> checkCurrency(Transfer transfer, Account account) {
         return account.getCurrency().equals(transfer.getCurrency()) ? Optional.empty()
-                : Optional.of(new Rejection("CURRENCY_MISMATCH", "Account " + account.getId() + " holds "
+                : Optional.of(new Rejection(CURRENCY_MISMATCH, "Account " + account.getId() + " holds "
                 + account.getCurrency() + " but the transfer is in " + transfer.getCurrency()));
     }
 
     private static Optional<Rejection> checkFunds(Transfer transfer, Account source) {
         return source.canDebit(transfer.getAmount()) ? Optional.empty()
-                : Optional.of(new Rejection("INSUFFICIENT_FUNDS", "Account " + source.getId()
+                : Optional.of(new Rejection(INSUFFICIENT_FUNDS, "Account " + source.getId()
                 + " has insufficient funds for " + transfer.getAmount() + " " + transfer.getCurrency()));
     }
 }

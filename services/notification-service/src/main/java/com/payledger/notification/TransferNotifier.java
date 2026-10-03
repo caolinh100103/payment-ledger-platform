@@ -41,6 +41,9 @@ class TransferNotifier {
         this.store = store;
         this.sender = sender;
         this.meters = meters;
+        meters.counter("payledger.events.consumed", "outcome", "processed");
+        meters.counter("payledger.events.consumed", "outcome", "duplicate");
+        meters.counter("payledger.notifications.sent", "channel", Notification.Channel.SMS.name());
     }
 
     /** @return the notifications sent; empty for a redelivered event or one that concerns no customer */

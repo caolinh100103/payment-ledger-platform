@@ -31,6 +31,10 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     public ApiExceptionHandler(MeterRegistry meters) {
         this.meters = meters;
+        // From zero, so the first deadlock is an increase that alerts, not a new series that starts at 1.
+        for (String reason : new String[]{"lock_timeout", "deadlock"}) {
+            meters.counter("payledger.lock.failures", "reason", reason);
+        }
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

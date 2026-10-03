@@ -40,7 +40,8 @@ import java.util.concurrent.TimeoutException;
  *
  * <p>Metrics: {@code payledger_outbox_publish_attempts_total{topic, outcome}} counts sends that Kafka acknowledged
  * ({@code published}) or not ({@code failed}), and {@code payledger_outbox_delivery_delay_seconds} times each event
- * from its commit to Kafka's acknowledgement: the delay consumers see before their own lag.
+ * from when it was written (just before its commit) to Kafka's acknowledgement: the delay consumers see before
+ * their own lag.
  */
 @Component
 public class OutboxRelay {
@@ -75,6 +76,12 @@ public class OutboxRelay {
                 .minimumExpectedValue(Duration.ofMillis(1))
                 .maximumExpectedValue(Duration.ofMinutes(10))
                 .register(meters);
+        // From zero for the core's topics, so the first failed send is an increase rather than a new series.
+        for (String topic : new String[]{EventTopics.TRANSFERS, EventTopics.ACCOUNTS, EventTopics.SECURITY}) {
+            for (String outcome : new String[]{"published", "failed"}) {
+                meters.counter("payledger.outbox.publish.attempts", "topic", topic, "outcome", outcome);
+            }
+        }
     }
 
     /**

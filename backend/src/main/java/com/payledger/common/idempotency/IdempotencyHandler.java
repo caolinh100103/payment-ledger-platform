@@ -25,6 +25,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -60,6 +63,7 @@ public class IdempotencyHandler {
     static final String REPLAYED_HEADER = "Idempotent-Replayed";
 
     private static final Pattern KEY_FORMAT = Pattern.compile("^[\\x21-\\x7E]{1,255}$");
+    private static final List<String> OUTCOMES = List.of("executed", "released", "replayed", "key_reused", "in_progress");
 
     private final IdempotencyStore store;
     private final CurrentActor currentActor;
@@ -69,6 +73,7 @@ public class IdempotencyHandler {
     private final Duration lease;
     private final Duration retention;
     private final MeterRegistry meters;
+    private final Set<String> routesCounted = ConcurrentHashMap.newKeySet();
 
     public IdempotencyHandler(IdempotencyStore store, CurrentActor currentActor, JsonMapper jsonMapper,
                               PlatformTransactionManager txManager, MeterRegistry meters,
@@ -145,6 +150,10 @@ public class IdempotencyHandler {
     }
 
     private void count(String uri, String outcome) {
+        if (routesCounted.add(uri)) {
+            // Every outcome of a route from zero, so the first replay or reused key is an increase, not a new series.
+            OUTCOMES.forEach(each -> meters.counter("payledger.idempotency.requests", "uri", uri, "outcome", each));
+        }
         meters.counter("payledger.idempotency.requests", "uri", uri, "outcome", outcome).increment();
     }
 

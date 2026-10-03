@@ -18,8 +18,8 @@ import java.util.UUID;
  * A customer account. Status transitions are enforced here rather than in the service
  * so no caller can put an account into an invalid state.
  *
- * <p>{@code balance} is in the currency's minor unit. It is only changed by the ledger
- * (Phase 2), never directly through the API.
+ * <p>{@code balance} is in the currency's minor unit and equals credits minus debits. It is only
+ * changed by the ledger, never directly through the API.
  */
 @Entity
 @Table(name = "accounts")
@@ -33,6 +33,10 @@ public class Account {
 
     @Column(nullable = false, updatable = false, length = 3)
     private String currency;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false, length = 16)
+    private AccountType type;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -60,6 +64,7 @@ public class Account {
         account.id = UUID.randomUUID();
         account.ownerId = ownerId;
         account.currency = currency;
+        account.type = AccountType.CUSTOMER;
         account.status = AccountStatus.ACTIVE;
         account.balance = 0;
         account.createdAt = now();
@@ -68,16 +73,19 @@ public class Account {
     }
 
     public void freeze() {
+        requireCustomer("freeze");
         requireStatus(AccountStatus.ACTIVE, "freeze");
         status = AccountStatus.FROZEN;
     }
 
     public void unfreeze() {
+        requireCustomer("unfreeze");
         requireStatus(AccountStatus.FROZEN, "unfreeze");
         status = AccountStatus.ACTIVE;
     }
 
     public void close() {
+        requireCustomer("close");
         if (status == AccountStatus.CLOSED) {
             throw invalidTransition("close");
         }
@@ -86,6 +94,44 @@ public class Account {
                     "Account " + id + " cannot be closed while its balance is " + balance);
         }
         status = AccountStatus.CLOSED;
+    }
+
+    /**
+     * Ledger-only: decreases the balance. Business rules (status, available funds) are checked by the
+     * caller so a rejection can be recorded; this guard only stops a bug from overdrawing a customer.
+     */
+    public void debit(long amount) {
+        requirePositive(amount);
+        long newBalance = Math.subtractExact(balance, amount);
+        if (type == AccountType.CUSTOMER && newBalance < 0) {
+            throw new IllegalStateException("Debit of " + amount + " would overdraw customer account " + id);
+        }
+        balance = newBalance;
+    }
+
+    /** Ledger-only: increases the balance. */
+    public void credit(long amount) {
+        requirePositive(amount);
+        balance = Math.addExact(balance, amount);
+    }
+
+    /** System accounts may go negative; customer accounts only spend what they hold. */
+    public boolean canDebit(long amount) {
+        return type == AccountType.SYSTEM || balance >= amount;
+    }
+
+    private static void requirePositive(long amount) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("Amount must be positive, got " + amount);
+        }
+    }
+
+    // System accounts back every customer balance; their lifecycle is an operational change, not an API call.
+    private void requireCustomer(String action) {
+        if (type != AccountType.CUSTOMER) {
+            throw new BusinessRuleViolationException("SYSTEM_ACCOUNT_NOT_MODIFIABLE",
+                    "Cannot " + action + " system account " + id);
+        }
     }
 
     private void requireStatus(AccountStatus expected, String action) {
@@ -119,6 +165,10 @@ public class Account {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public AccountType getType() {
+        return type;
     }
 
     public AccountStatus getStatus() {

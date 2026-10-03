@@ -77,13 +77,14 @@ public class AccountController {
             UUID id,
             String ownerId,
             String currency,
+            AccountType type,
             AccountStatus status,
             long balance,
             Instant createdAt,
             Instant updatedAt) {
 
         static AccountResponse from(Account account) {
-            return new AccountResponse(account.getId(), account.getOwnerId(), account.getCurrency(),
+            return new AccountResponse(account.getId(), account.getOwnerId(), account.getCurrency(), account.getType(),
                     account.getStatus(), account.getBalance(), account.getCreatedAt(), account.getUpdatedAt());
         }
     }

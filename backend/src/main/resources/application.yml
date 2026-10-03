@@ -33,3 +33,14 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+payledger:
+  ledger:
+    # Max wait for an account row lock; beyond it the request fails fast with a retryable 503.
+    lock-timeout: 3s
+  idempotency:
+    # How long a key and its stored response are kept (Stripe keeps keys for 24 hours).
+    retention: 24h
+    # If the request holding a key dies, another request with the same key may take over after this.
+    lease: 30s
+    cleanup-interval: PT10M

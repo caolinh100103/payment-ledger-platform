@@ -33,6 +33,9 @@ class AuditEventListenerIntegrationTest {
     @Autowired
     MockMvcTester mvc;
 
+    @Autowired
+    TestJwtIssuer tokens;
+
     @Test
     void recordsEachEventOfATransfer() throws Exception {
         String transfer = UUID.randomUUID().toString();
@@ -49,7 +52,8 @@ class AuditEventListenerIntegrationTest {
             assertThat(r.event().actor()).isEqualTo("anonymous");
             assertThat(r.event().source()).isEqualTo("/payledger/core");
         });
-        assertThat(mvc.get().uri("/api/v1/audit-events?resourceId={id}", transfer))
+        assertThat(mvc.get().uri("/api/v1/audit-events?resourceId={id}", transfer)
+                .header("Authorization", tokens.bearer("auditor-1", "AUDITOR")))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$[1].event.data.amount").isEqualTo(250000);
     }
@@ -74,7 +78,8 @@ class AuditEventListenerIntegrationTest {
     void verificationEndpointReportsTheChainHead() {
         auditLog.append(AuditTestEvents.event(UUID.randomUUID().toString()));
 
-        assertThat(mvc.get().uri("/api/v1/audit-events/verification"))
+        assertThat(mvc.get().uri("/api/v1/audit-events/verification")
+                .header("Authorization", tokens.bearer("auditor-1", "AUDITOR")))
                 .hasStatusOk()
                 .bodyJson()
                 .satisfies(json -> {

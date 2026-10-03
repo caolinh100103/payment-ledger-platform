@@ -1,5 +1,7 @@
 package com.payledger.notification;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -7,7 +9,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-// Temporary: any caller can read any customer's messages until Phase 4 limits it to the customer themselves.
 @RestController
 @RequestMapping("/api/v1/notifications")
 class NotificationController {
@@ -20,9 +21,14 @@ class NotificationController {
         this.store = store;
     }
 
-    /** A customer's messages, newest first. */
+    /**
+     * A customer's messages, newest first. Customers get their own ({@code recipientId} omitted or their own id);
+     * operators name the customer, e.g. to check whether an SMS went out.
+     */
     @GetMapping
-    List<Notification> byRecipient(@RequestParam String recipientId) {
-        return store.findByRecipient(recipientId, MAX_RESULTS);
+    @PreAuthorize("hasRole('OPERATOR')"
+            + " or (hasRole('CUSTOMER') and (#recipientId == null or #recipientId == authentication.name))")
+    List<Notification> byRecipient(@RequestParam(required = false) String recipientId, Authentication authentication) {
+        return store.findByRecipient(recipientId != null ? recipientId : authentication.getName(), MAX_RESULTS);
     }
 }

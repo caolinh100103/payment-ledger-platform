@@ -38,6 +38,7 @@ class RetryAndDeadLetterIntegrationTest extends ConsumerTestSupport {
         UUID eventId = UUID.randomUUID();
         doThrow(new IllegalStateException("SMS gateway down"))
                 .when(sender).send(argThat(n -> n.eventId().equals(eventId)));
+        double parkedBefore = count("payledger.events.dead.lettered", "topic", TOPIC);
 
         kafka.send(TOPIC, "transfer-dlt", TestEvents.completedTransfer(eventId, "Rent")).get();
 
@@ -50,6 +51,9 @@ class RetryAndDeadLetterIntegrationTest extends ConsumerTestSupport {
         assertThat(processingAttempts(parked)).isEqualTo(4);
         verify(sender, times(4)).send(argThat(n -> n.eventId().equals(eventId)));
         assertThat(store.findByEvent(eventId)).isEmpty();
+        // The counter the alert fires on, tagged with the topic the event came from.
+        await().atMost(Duration.ofSeconds(10))
+                .until(() -> count("payledger.events.dead.lettered", "topic", TOPIC) >= parkedBefore + 1);
     }
 
     @Test

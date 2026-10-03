@@ -37,8 +37,9 @@ spring:
   task:
     scheduling:
       pool:
-        # The outbox relay blocks while Kafka is down; housekeeping jobs must not wait behind it.
-        size: 2
+        # The outbox relay blocks while Kafka is down. The backlog metrics must keep updating exactly then, and
+        # housekeeping jobs must not wait behind it either.
+        size: 3
 
 server:
   port: ${SERVER_PORT:8080}
@@ -135,6 +136,8 @@ payledger:
     # Published rows are kept this long for debugging and replay, then deleted.
     retention: 7d
     cleanup-interval: PT10M
+    # How often payledger_outbox_pending and payledger_outbox_oldest_pending_age_seconds are refreshed.
+    metrics-interval: PT10S
   ledger:
     # Max wait for an account row lock; beyond it the request fails fast with a retryable 503.
     lock-timeout: 3s

@@ -1,5 +1,7 @@
 package com.payledger.outbox;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.slf4j.Logger;
@@ -34,6 +36,10 @@ import java.util.concurrent.TimeoutException;
  *       that holds its lock. A crash between the acknowledgement and the commit republishes the event:
  *       delivery is at-least-once and consumers deduplicate on the event id.</li>
  * </ul>
+ *
+ * <p>Metrics: {@code payledger_outbox_publish_attempts_total{topic, outcome}} counts sends that Kafka acknowledged
+ * ({@code published}) or not ({@code failed}), and {@code payledger_outbox_delivery_delay_seconds} times each event
+ * from its commit to Kafka's acknowledgement: the delay consumers see before their own lag.
  */
 @Component
 public class OutboxRelay {
@@ -47,8 +53,11 @@ public class OutboxRelay {
     private final TransactionTemplate tx;
     private final int batchSize;
     private final Duration sendTimeout;
+    private final MeterRegistry meters;
+    private final Timer deliveryDelay;
 
     public OutboxRelay(JdbcTemplate jdbc, KafkaTemplate<String, String> kafka, PlatformTransactionManager txManager,
+                       MeterRegistry meters,
                        @Value("${payledger.outbox.relay.batch-size:100}") int batchSize,
                        @Value("${payledger.outbox.relay.send-timeout:15s}") Duration sendTimeout) {
         this.jdbc = jdbc;
@@ -56,6 +65,13 @@ public class OutboxRelay {
         this.tx = new TransactionTemplate(txManager);
         this.batchSize = batchSize;
         this.sendTimeout = sendTimeout;
+        this.meters = meters;
+        this.deliveryDelay = Timer.builder("payledger.outbox.delivery.delay")
+                .description("Time from an event's commit to its acknowledgement by Kafka")
+                .publishPercentileHistogram()
+                .minimumExpectedValue(Duration.ofMillis(1))
+                .maximumExpectedValue(Duration.ofMinutes(10))
+                .register(meters);
     }
 
     /**
@@ -78,8 +94,10 @@ public class OutboxRelay {
     }
 
     private List<PendingEvent> lockNextBatch() {
+        long now = System.nanoTime();
         return jdbc.query("""
-                SELECT id, aggregate_id, topic, payload::text AS payload
+                SELECT id, aggregate_id, topic, payload::text AS payload,
+                       extract(epoch FROM clock_timestamp() - created_at) AS age_seconds
                 FROM outbox o
                 WHERE published_at IS NULL
                   AND NOT EXISTS (SELECT 1 FROM outbox older
@@ -90,7 +108,8 @@ public class OutboxRelay {
                 LIMIT ?
                 FOR UPDATE SKIP LOCKED
                 """, (rs, row) -> new PendingEvent(rs.getLong("id"), rs.getObject("aggregate_id", UUID.class),
-                rs.getString("topic"), rs.getString("payload")), batchSize);
+                rs.getString("topic"), rs.getString("payload"),
+                now - (long) (rs.getDouble("age_seconds") * 1_000_000_000L)), batchSize);
     }
 
     /** Sends the whole batch, then waits for the acknowledgements. Returns the ids Kafka acknowledged. */
@@ -114,9 +133,12 @@ public class OutboxRelay {
             try {
                 sends.get(i).get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
                 published.add(event.id());
+                deliveryDelay.record(System.nanoTime() - event.createdAtNanos(), TimeUnit.NANOSECONDS);
+                countAttempt(event, "published");
             } catch (ExecutionException | TimeoutException e) {
                 lastError = describe(e);
                 recordFailure(event, lastError);
+                countAttempt(event, "failed");
             } catch (InterruptedException e) {
                 // Shutting down: what was acknowledged so far is still marked; the rest is retried later.
                 Thread.currentThread().interrupt();
@@ -143,6 +165,10 @@ public class OutboxRelay {
         }
     }
 
+    private void countAttempt(PendingEvent event, String outcome) {
+        meters.counter("payledger.outbox.publish.attempts", "topic", event.topic(), "outcome", outcome).increment();
+    }
+
     private void recordFailure(PendingEvent event, String error) {
         jdbc.update("UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?",
                 error.length() > MAX_ERROR_LENGTH ? error.substring(0, MAX_ERROR_LENGTH) : error, event.id());
@@ -163,6 +189,10 @@ public class OutboxRelay {
         return cause.getClass().getSimpleName() + ": " + cause.getMessage();
     }
 
-    private record PendingEvent(long id, UUID aggregateId, String topic, String payload) {
+    /**
+     * @param createdAtNanos when the event was written, on this JVM's {@link System#nanoTime()} scale. Its age is
+     *                       measured with the database clock, so the clocks of the two hosts are never compared.
+     */
+    private record PendingEvent(long id, UUID aggregateId, String topic, String payload, long createdAtNanos) {
     }
 }

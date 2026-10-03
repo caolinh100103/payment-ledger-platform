@@ -1,5 +1,7 @@
 package com.payledger.audit;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,6 +37,9 @@ class AuditEventListenerIntegrationTest {
 
     @Autowired
     TestJwtIssuer tokens;
+
+    @Autowired
+    MeterRegistry meters;
 
     /** Who froze an account, and who failed to sign in, go into the same chain as the money movements. */
     @Test
@@ -82,6 +87,7 @@ class AuditEventListenerIntegrationTest {
         String transfer = UUID.randomUUID().toString();
         String message = cloudEvent(UUID.randomUUID(), "com.payledger.transfer.completed", transfer);
         String marker = cloudEvent(UUID.randomUUID(), "com.payledger.transfer.reversed", transfer);
+        double duplicates = consumed("duplicate");
 
         kafka.send(TOPIC, transfer, message).get();
         kafka.send(TOPIC, transfer, message).get();
@@ -91,6 +97,12 @@ class AuditEventListenerIntegrationTest {
         await().atMost(Duration.ofSeconds(30)).until(() -> auditLog.findByResource(transfer, 10).size() == 2);
         assertThat(auditLog.findByResource(transfer, 10)).extracting(r -> r.event().action())
                 .containsExactly("com.payledger.transfer.completed", "com.payledger.transfer.reversed");
+        assertThat(consumed("duplicate")).isEqualTo(duplicates + 1);
+    }
+
+    private double consumed(String outcome) {
+        Counter counter = meters.find("payledger.events.consumed").tag("outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test

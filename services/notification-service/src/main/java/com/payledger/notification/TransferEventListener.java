@@ -1,5 +1,6 @@
 package com.payledger.notification;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
@@ -33,10 +34,12 @@ class TransferEventListener {
 
     private final TransferNotifier notifier;
     private final JsonMapper json;
+    private final MeterRegistry meters;
 
-    TransferEventListener(TransferNotifier notifier, JsonMapper json) {
+    TransferEventListener(TransferNotifier notifier, JsonMapper json, MeterRegistry meters) {
         this.notifier = notifier;
         this.json = json;
+        this.meters = meters;
     }
 
     @RetryableTopic(
@@ -56,12 +59,17 @@ class TransferEventListener {
         notifier.handle(TransferEvent.parse(record.value(), json));
     }
 
-    /** Parked events need a person: this log line is what the alert (Phase 5) fires on. */
+    /**
+     * Parked events need a person: a customer did not get a balance-change message. Counted in
+     * {@code payledger_events_dead_lettered_total{topic}}, which the alert fires on.
+     */
     @DltHandler
     void onDeadLetter(ConsumerRecord<String, String> record) {
+        String originalTopic = header(record, KafkaHeaders.ORIGINAL_TOPIC);
         log.error("Event parked on {} (key {}, offset {}), originally from {}: {}", record.topic(), record.key(),
-                record.offset(), header(record, KafkaHeaders.ORIGINAL_TOPIC),
-                header(record, KafkaHeaders.EXCEPTION_MESSAGE));
+                record.offset(), originalTopic, header(record, KafkaHeaders.EXCEPTION_MESSAGE));
+        meters.counter("payledger.events.dead.lettered", "topic", originalTopic == null ? record.topic() : originalTopic)
+                .increment();
     }
 
     private static String header(ConsumerRecord<?, ?> record, String name) {

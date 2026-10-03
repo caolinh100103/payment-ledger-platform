@@ -2,6 +2,7 @@ package com.payledger.outbox;
 
 import com.jayway.jsonpath.JsonPath;
 import com.payledger.TestcontainersConfiguration;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -57,6 +58,12 @@ class OutboxRelayIntegrationTest {
 
     @Autowired
     KafkaContainer kafka;
+
+    @Autowired
+    OutboxMetrics outboxMetrics;
+
+    @Autowired
+    MeterRegistry meters;
 
     @AfterEach
     void discardUnpublishableEvents() {
@@ -147,6 +154,43 @@ class OutboxRelayIntegrationTest {
         // Publishing the later event first would break the order consumers rely on.
         assertThat(jdbc.queryForObject("SELECT published_at IS NULL FROM outbox WHERE event_id = ?", Boolean.class,
                 heldBack)).isTrue();
+    }
+
+    @Test
+    void countsSendsByOutcomeAndTimesTheDeliveryDelay() {
+        String topic = createTopic();
+        String invalidTopic = "not a valid topic!";
+        long delivered = meters.get("payledger.outbox.delivery.delay").timer().count();
+        append(topic, UUID.randomUUID(), 0);
+        append(invalidTopic, UUID.randomUUID(), 0);
+
+        drain();
+
+        assertThat(meters.get("payledger.outbox.publish.attempts").tags("topic", topic, "outcome", "published")
+                .counter().count()).isEqualTo(1);
+        assertThat(meters.get("payledger.outbox.publish.attempts").tags("topic", invalidTopic, "outcome", "failed")
+                .counter().count()).isGreaterThanOrEqualTo(1);
+        assertThat(meters.get("payledger.outbox.delivery.delay").timer().count()).isEqualTo(delivered + 1);
+    }
+
+    @Test
+    void reportsTheBacklogAndHowLongItsOldestEventHasWaited() {
+        discardUnpublishableEvents();
+        outboxMetrics.refresh();
+        assertThat(gauge("payledger.outbox.pending")).isZero();
+        assertThat(gauge("payledger.outbox.oldest.pending.age")).isZero();
+
+        UUID stuck = append("relay-test-" + UUID.randomUUID(), UUID.randomUUID(), 0);
+        append("relay-test-" + UUID.randomUUID(), UUID.randomUUID(), 0);
+        jdbc.update("UPDATE outbox SET created_at = now() - interval '5 minutes' WHERE event_id = ?", stuck);
+        outboxMetrics.refresh();
+
+        assertThat(gauge("payledger.outbox.pending")).isEqualTo(2);
+        assertThat(gauge("payledger.outbox.oldest.pending.age")).isBetween(300.0, 360.0);
+    }
+
+    private double gauge(String name) {
+        return meters.get(name).gauge().value();
     }
 
     private UUID append(String topic, UUID aggregateId, int seq) {

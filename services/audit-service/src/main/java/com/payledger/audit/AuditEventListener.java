@@ -1,5 +1,6 @@
 package com.payledger.audit;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
@@ -23,7 +24,11 @@ import java.nio.charset.StandardCharsets;
  * <p>Failures are retried without blocking the topic (ADR 0008): after 2 s, 6 s, 18 s and 54 s on
  * {@code <topic>-audit-retry-0..3}, typically riding out a database failover. An event that still fails, or can
  * never be recorded (not a CloudEvent), is parked on {@code <topic>-audit-dlt}. A gap in the audit trail is a
- * compliance incident, so that is logged as an error for the on-call engineer.
+ * compliance incident, so that is logged as an error and counted in
+ * {@code payledger_events_dead_lettered_total{topic}}, which pages the on-call engineer.
+ *
+ * <p>{@code payledger_events_consumed_total{outcome}} counts events recorded ({@code processed}) and redeliveries
+ * recognised and skipped ({@code duplicate}): at-least-once delivery, made visible.
  */
 @Component
 class AuditEventListener {
@@ -32,10 +37,12 @@ class AuditEventListener {
 
     private final AuditLog auditLog;
     private final JsonMapper json;
+    private final MeterRegistry meters;
 
-    AuditEventListener(AuditLog auditLog, JsonMapper json) {
+    AuditEventListener(AuditLog auditLog, JsonMapper json, MeterRegistry meters) {
         this.auditLog = auditLog;
         this.json = json;
+        this.meters = meters;
     }
 
     @RetryableTopic(
@@ -55,17 +62,21 @@ class AuditEventListener {
         AuditableEvent event = AuditableEvent.parse(record.value(), json);
         if (auditLog.append(event)) {
             log.debug("Recorded {} {} for {}", event.action(), event.eventId(), event.resourceId());
+            meters.counter("payledger.events.consumed", "outcome", "processed").increment();
         } else {
             log.info("Skipped redelivered event {} ({}-{}@{})", event.eventId(), record.topic(), record.partition(),
                     record.offset());
+            meters.counter("payledger.events.consumed", "outcome", "duplicate").increment();
         }
     }
 
     @DltHandler
     void onDeadLetter(ConsumerRecord<String, String> record) {
+        String originalTopic = header(record, KafkaHeaders.ORIGINAL_TOPIC);
         log.error("AUDIT GAP: event parked on {} (key {}, offset {}), originally from {}: {}", record.topic(),
-                record.key(), record.offset(), header(record, KafkaHeaders.ORIGINAL_TOPIC),
-                header(record, KafkaHeaders.EXCEPTION_MESSAGE));
+                record.key(), record.offset(), originalTopic, header(record, KafkaHeaders.EXCEPTION_MESSAGE));
+        meters.counter("payledger.events.dead.lettered", "topic", originalTopic == null ? record.topic() : originalTopic)
+                .increment();
     }
 
     private static String header(ConsumerRecord<?, ?> record, String name) {

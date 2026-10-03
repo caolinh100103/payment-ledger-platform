@@ -5,6 +5,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,6 +51,9 @@ class AuditRetryIntegrationTest {
     @Autowired
     KafkaContainer kafkaContainer;
 
+    @Autowired
+    MeterRegistry meters;
+
     @Test
     void eventIsRecordedOnceTheDatabaseIsBack() throws Exception {
         UUID eventId = UUID.randomUUID();
@@ -68,6 +73,7 @@ class AuditRetryIntegrationTest {
     @Test
     void messageThatIsNotACloudEventIsParkedWithoutRetrying() {
         UUID marker = UUID.randomUUID();
+        double parkedBefore = deadLettered();
 
         kafka.send(TOPIC, "garbage", "not a CloudEvent " + marker);
 
@@ -76,6 +82,13 @@ class AuditRetryIntegrationTest {
         // The attempts header also counts the forward to the dead-letter topic: 2 means processed once.
         assertThat(ByteBuffer.wrap(parked.headers().lastHeader(RetryTopicHeaders.DEFAULT_HEADER_ATTEMPTS).value())
                 .getInt()).isEqualTo(2);
+        // The counter the AUDIT GAP alert fires on, tagged with the topic the event was meant for.
+        await().atMost(Duration.ofSeconds(10)).until(() -> deadLettered() == parkedBefore + 1);
+    }
+
+    private double deadLettered() {
+        Counter counter = meters.find("payledger.events.dead.lettered").tag("topic", TOPIC).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     private ConsumerRecord<String, String> awaitDeadLetter(UUID marker) {

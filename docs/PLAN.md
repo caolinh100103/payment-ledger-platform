@@ -45,6 +45,11 @@ Dự án phải thể hiện được:
 | 16 | **RBAC** bằng `@PreAuthorize` trên mọi endpoint (test fail nếu thiếu) + **kiểm tra sở hữu** trong service; ADMIN kế thừa OPERATOR, AUDITOR nhưng **không** kế thừa CUSTOMER; tài khoản của người khác trả **404**; **nạp tiền chỉ qua API key của ngân hàng** | Tách bạch nhiệm vụ: nhân viên không chuyển được tiền của khách; không lộ id tài khoản (OWASP API1) | [0011](adr/0011-authorization-and-api-keys.md) |
 | 17 | **API key** kiểu GitHub (`plk_` + 32 ký tự base62 + checksum CRC32), chỉ lưu SHA-256, có scope (`deposits:write`), hạn dùng, thu hồi | Secret scanning nhận ra key bị lộ; key gõ sai bị loại mà không cần query DB | [0011](adr/0011-authorization-and-api-keys.md) |
 | 18 | **Rate limit** token bucket trên **Redis** (Bucket4j) theo user / API key / IP; **fail-open** khi Redis lỗi | Theo Stripe: bộ giới hạn hỏng không được làm sập API; brute force vẫn bị chặn bởi khóa tài khoản trong PostgreSQL | [0012](adr/0012-rate-limiting.md) |
+| 19 | **Metrics nghiệp vụ đếm sau khi commit**; độ trễ dùng **histogram**; label chỉ có tập giá trị giới hạn; **mọi series khởi tạo bằng 0** | Giao dịch bị rollback thì chưa từng xảy ra; histogram cộng được giữa các instance để ra p95/p99 toàn cụm; label là account id sẽ làm nổ số time series; counter xuất hiện từ 1 thì `increase()` không thấy, alert không bắn | [0013](adr/0013-metrics-and-alerting.md) |
+| 20 | **Consumer lag đo từ phía broker** bằng kafka-exporter | Consumer chết hoặc treo thì không tự báo lag, đúng lúc lag quan trọng nhất (lý do LinkedIn làm Burrow) | [0013](adr/0013-metrics-and-alerting.md) |
+| 21 | **Alert theo triệu chứng**, mỗi alert có **runbook** và **unit test `promtool`** chạy trong CI | Theo Google SRE: báo khi người dùng / kiểm toán bị ảnh hưởng, không báo theo CPU; alert không được test thì không biết có bắn hay không | [0013](adr/0013-metrics-and-alerting.md) |
+| 22 | **Trace id là correlation id** (OpenTelemetry, W3C Trace Context); trace đi **xuyên qua outbox** nhờ lưu `traceparent` trong CloudEvent (Distributed Tracing extension), relay tạo span con từ đó | Outbox là bảng DB nên trace bị đứt ở đó; Debezium làm tương tự với cột `tracingspancontext`; trace id còn nằm trong audit trail | [0014](adr/0014-trace-context-and-structured-logs.md) |
+| 23 | Mọi response có **`X-Trace-Id`** và **`x-fapi-interaction-id`** (FAPI, open banking); **log JSON theo ECS** có `trace.id` | Khách / ngân hàng đối tác báo một mã là tìm được cả chuỗi; log có cấu trúc thì tìm theo field, không grep | [0014](adr/0014-trace-context-and-structured-logs.md) |
 
 ---
 
@@ -64,11 +69,14 @@ Ngân hàng đối tác ──┤  X-API-Key (chỉ nạp tiền)
               PostgreSQL ◄── Outbox relay ──► Kafka: transfers / accounts / security
                                                 ├── Notification Service ─┐ verify token
                                                 └── Audit Service ────────┘ bằng JWKS của core
-            Prometheus + Grafana: metrics
+
+  Observability: metrics ──► Prometheus (+ kafka-exporter đo lag, alert rules) ──► Grafana
+                 trace (OTLP) ──► Jaeger: một trace cho mỗi giao dịch, HTTP → outbox → Kafka → consumer
+                 log: JSON theo ECS, có trace.id
 ```
 
 **Tech stack:** Java 21 · Spring Boot 4.1 · Spring Security 7 · PostgreSQL 17 · Flyway · Kafka 4 (KRaft) ·
-Redis + Bucket4j ·
+Redis + Bucket4j · Micrometer + OpenTelemetry · Jaeger · kafka-exporter ·
 Testcontainers · Prometheus · Grafana · Docker Compose · GitHub Actions · React + TypeScript
 
 ---
@@ -87,6 +95,7 @@ idempotency_keys ((scope, idempotency_key) PK, request_hash, status, response_st
                   response_location, lock_token, locked_until, created_at, expires_at)               -- ✅ Phase 2
 outbox           (id BIGINT identity, event_id UNIQUE, aggregate_type, aggregate_id, event_type, topic,
                   payload JSON, created_at, published_at, attempts, last_error)                       -- ✅ Phase 3
+                                                       -- Phase 5: payload có traceparent; created_at = clock_timestamp()
 users            (id, username UNIQUE lower-case, password_hash Argon2id, role, failed_login_attempts,
                   locked_until, last_login_at, version, created_at, updated_at)                      -- ✅ Phase 4
 auth_sessions    (id, user_id, created_at, expires_at, revoked_at, revoke_reason LOGOUT/REFRESH_TOKEN_REUSE) -- ✅ Phase 4
@@ -247,12 +256,52 @@ theo quy định Ngân hàng Nhà nước; công cụ xoay vòng khóa ký (JWKS
 nghỉ việc; BFF + cookie HttpOnly cho SPA (Phase 6); mTLS cho kết nối ngân hàng; concurrent request limiter và load
 shedding; thư viện bảo mật dùng chung cho các service.
 
-### ⬜ Phase 5: Observability
+### ✅ Phase 5: Observability (hoàn thành 2026-10-03)
 
-- [ ] Metrics nghiệp vụ: `transfers_total{status}`, latency p50/p95/p99, lock timeout, số request trùng idempotency key
-- [ ] Kafka consumer lag
-- [ ] Grafana dashboard (lưu file JSON trong repo)
-- [ ] Structured logging + correlation ID xuyên suốt HTTP → Kafka
+- [x] Metrics nghiệp vụ: `payledger_transfers_total{type,status,failure_code}`, khối lượng tiền, thời gian giao dịch
+      p50/p95/p99 (histogram), thời gian chờ lock, lock timeout / deadlock, số request trùng idempotency key
+      (replayed / in_progress / key_reused); chỉ đếm sau khi transaction commit, mọi series bắt đầu từ 0
+- [x] Metrics cho outbox (số event chờ, tuổi event cũ nhất, độ trễ publish) và consumer (processed / duplicate /
+      dead-lettered, SMS đã gửi)
+- [x] Kafka consumer lag đo từ broker bằng kafka-exporter
+- [x] Grafana dashboard (lưu file JSON trong repo): *Money movement* và *Events & platform*, có exemplar mở trace
+- [x] Structured logging (JSON theo Elastic Common Schema) + correlation ID xuyên suốt HTTP → outbox → Kafka →
+      consumer: trace id của OpenTelemetry, trả về `X-Trace-Id` và `x-fapi-interaction-id`
+- [x] Tracing phân tán bằng OpenTelemetry, xem trong Jaeger; trace context lưu trong event nên có cả trong audit trail
+- [x] 10 alert rule theo triệu chứng, mỗi rule có mục trong [runbook](runbook.md), unit test bằng `promtool` trong CI
+- [x] Demo: [scripts/demo-observability.sh](../scripts/demo-observability.sh)
+- [x] ADR: metrics và alerting (0013), trace context và log (0014)
+
+**Kết quả:** 263 test (core 210, audit-service 28, notification-service 25) và 6 test cho alert rule (`promtool`).
+Đã kiểm chứng bằng mutation test: bỏ bước gắn trace context vào event trong outbox thì test trace fail; đếm giao dịch
+trước khi commit thì test rollback fail.
+
+Chạy trên stack thật (3 service + docker compose): một giao dịch cho ra **một trace** qua 3 service (HTTP → 2 span
+publish của relay → 4 span xử lý ở audit và notification). `traceparent` có trong outbox và trong audit trail. Bắn 40
+giao dịch song song từ cùng một tài khoản thì p99 khoảng 1,4 s, gần bằng p99 thời gian chờ lock: đúng dấu hiệu tài
+khoản "nóng" của ADR 0004, nhìn thấy được trên dashboard.
+
+**Bài học / phát hiện khi làm:**
+- Counter của Micrometer chỉ xuất hiện ở lần tăng đầu tiên, nên Prometheus thấy nó bắt đầu từ 1 và `increase()` không
+  thấy thay đổi. Alert "có event vào DLT" hay "có deadlock" sẽ **không bao giờ bắn** cho lần đầu tiên. Phải khởi tạo
+  mọi series bằng 0 khi khởi động. Phát hiện khi chạy demo: traffic xảy ra trước lần scrape đầu tiên thì không hiện.
+- `now()` của PostgreSQL là thời điểm **bắt đầu** transaction. `outbox.created_at` dùng mặc định `now()` nên độ trễ
+  publish bị cộng cả thời gian giao dịch chờ lock. Đổi sang `clock_timestamp()` lúc insert.
+- kafka-exporter trả lag = -1 cho partition chưa có offset nào được commit; phải `clamp_min(..., 0)`.
+- Trace bị đứt ở outbox vì relay chạy trên thread khác, không có context. Phải lưu `traceparent` trong event và để
+  relay tạo span con từ đó.
+- Relay poll 5 lần/giây: để mặc định thì mỗi lần poll của `@Scheduled` là một trace rỗng. Loại bằng
+  `ObservationPredicate`, cùng với các request vào actuator.
+- Trace flags của OpenTelemetry là `03` (sampled + trace id ngẫu nhiên theo Trace Context Level 2), không chỉ `01`.
+- Micrometer ghi `traceId` / `spanId` vào MDC; phải đổi tên thành `trace.id` / `span.id` cho đúng ECS.
+- `x-fapi-interaction-id` do client gửi chỉ được dùng nếu là UUID, nếu không sẽ thành log / header injection.
+- Grafana tính `$__interval` theo độ rộng panel (có thể chỉ 2 giây, nhỏ hơn chu kỳ scrape 15 giây) nên
+  `increase(...[$__interval])` ra rỗng. Panel dạng cột cần min interval 1 phút.
+
+**Để dành cho sau:** Alertmanager và định tuyến cảnh báo (PagerDuty, Slack); SLO và burn-rate alert; tail sampling
+bằng OpenTelemetry Collector; đưa log vào Loki / Elasticsearch; postgres-exporter (deadlock, kết nối, bloat của bảng
+outbox); công cụ replay DLT; metric cho audit chain (head, kết quả verify định kỳ); metric cho JDBC
+(datasource-micrometer); load test bằng k6 (Phase 6).
 
 ### ⬜ Phase 6: Frontend & hoàn thiện
 
@@ -319,7 +368,10 @@ fix/transfer-deadlock
 6. **Bảo mật** (`scripts/demo-security.sh`): khách hàng khác không đọc / không chuyển được tiền từ tài khoản của Alice
    (404, không để lại dấu vết); đoán sai mật khẩu 5 lần thì bị khóa, operator mở khóa; refresh token bị đánh cắp thì cả
    phiên bị thu hồi; bắn nhiều request thì nhận 429; audit trail cho thấy ai làm gì, từ IP nào.
-7. **Observability:** chạy load test bằng k6 và theo dõi latency, error rate trên Grafana.
+7. **Observability** (`scripts/demo-observability.sh`): một giao dịch trả về `X-Trace-Id`; cùng trace id đó có trong
+   outbox, trong Jaeger (core → relay → audit + notification) và trong audit trail. Sau đó xem trên Grafana: p99,
+   giao dịch bị từ chối theo lý do, replay idempotency, lag; bấm vào exemplar để mở trace của một request chậm.
+   (Phase 6: load test bằng k6.)
 
 ---
 
@@ -344,3 +396,10 @@ fix/transfer-deadlock
 - Vì sao trả 404 thay vì 403 cho tài khoản của người khác?
 - Vì sao ADMIN không được chuyển tiền của khách, và không được nạp tiền?
 - Rate limiter nên fail-open hay fail-closed? Token bucket khác fixed window thế nào?
+- Vì sao metric giao dịch phải đếm sau khi commit? Vì sao dùng histogram mà không tính percentile ở từng instance?
+- Vì sao không được gắn account id hay user id làm label của metric? Thông tin đó để ở đâu?
+- Counter bắt đầu từ 1 thay vì 0 gây ra vấn đề gì cho `increase()` và cho alert?
+- Consumer lag nên đo ở đâu? Vì sao không dựa vào metric của chính consumer?
+- Trace bị đứt ở đâu trong outbox pattern, và nối lại thế nào? Parent hay link?
+- Alert nên dựa vào triệu chứng hay nguyên nhân? Làm sao test một alert rule?
+- Vì sao trả về cả `X-Trace-Id` và `x-fapi-interaction-id`? Khác nhau thế nào?

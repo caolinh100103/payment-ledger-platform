@@ -3,9 +3,9 @@
 A banking-oriented payment platform: accounts, money transfers with a double-entry ledger,
 idempotent APIs, concurrency-safe balance updates, and event-driven downstream processing.
 
-> Status: **Phase 4 – Security** done (ES256 access tokens with rotating refresh tokens, Argon2id passwords and
-> lockout, role-based and object-level authorization, hashed API keys for the bank integration, rate limiting on
-> Redis, security events in the audit trail). Next: Phase 5 – observability.
+> Status: **Phase 5 – Observability** done (business metrics counted after commit, one OpenTelemetry trace from the
+> HTTP request through the outbox to both consumers, JSON logs in Elastic Common Schema, consumer lag from the broker,
+> tested alert rules with a runbook, Grafana dashboards as code). Next: Phase 6 – frontend and polish.
 
 ## Architecture
 
@@ -24,7 +24,10 @@ Partner bank ───────┤  X-API-Key (deposits only)
                                                    ├── Notification Service ✅ (own DB)
                                                    └── Audit Service ✅ (own DB, hash chain)
                                       both verify tokens with the core's public keys (JWKS)
-            Prometheus + Grafana: metrics
+
+  Observability ✅  metrics ──► Prometheus (+ kafka-exporter for lag, alert rules) ──► Grafana dashboards
+                    traces (OTLP) ──► Jaeger: one trace per payment, HTTP → outbox → Kafka → consumers
+                    logs: JSON lines (ECS) with trace.id on stdout
 ```
 
 Key design decisions are recorded in [docs/adr](docs/adr):
@@ -43,13 +46,17 @@ Key design decisions are recorded in [docs/adr](docs/adr):
 | [0010](docs/adr/0010-authentication-tokens.md) | ES256 access tokens, JWKS, rotating refresh tokens, Argon2id passwords and lockout |
 | [0011](docs/adr/0011-authorization-and-api-keys.md) | Role-based and object-level authorization, API keys for machine clients |
 | [0012](docs/adr/0012-rate-limiting.md) | Token-bucket rate limiting in Redis, failing open |
+| [0013](docs/adr/0013-metrics-and-alerting.md) | Business metrics counted after commit, consumer lag from the broker, symptom-based alerts |
+| [0014](docs/adr/0014-trace-context-and-structured-logs.md) | One trace through the outbox (CloudEvents `traceparent`), `X-Trace-Id` and FAPI interaction id, ECS JSON logs |
 
-The event contract is documented in [docs/events.md](docs/events.md).
+The event contract is documented in [docs/events.md](docs/events.md); what to do when an alert fires, in
+[docs/runbook.md](docs/runbook.md).
 
 ## Tech stack
 
 Java 21 · Spring Boot 4.1 · Spring Security 7 (OAuth 2.0 resource server, Nimbus JOSE) · PostgreSQL 17 · Flyway ·
-Kafka 4 (KRaft) · Redis + Bucket4j · Testcontainers · Prometheus · Grafana · Docker Compose · GitHub Actions
+Kafka 4 (KRaft) · Redis + Bucket4j · Micrometer + OpenTelemetry · Prometheus · Grafana · Jaeger · kafka-exporter ·
+Testcontainers · Docker Compose · GitHub Actions
 
 ## Getting started
 
@@ -82,8 +89,10 @@ cd ../services/notification-service && ./mvnw spring-boot:run
 | Redis       | localhost:16379                      |                             |
 | Kafka       | localhost:29092                      |                             |
 | Kafka UI    | http://localhost:8081                |                             |
-| Prometheus  | http://localhost:9090                |                             |
-| Grafana     | http://localhost:3000                | admin / admin               |
+| Prometheus  | http://localhost:9090                | Alert rules under `/alerts` |
+| Grafana     | http://localhost:3000                | admin / admin; dashboards in the *PayLedger* folder |
+| Jaeger      | http://localhost:16686               | Traces; OTLP/HTTP on 4318   |
+| kafka-exporter | http://localhost:9308/metrics     | Consumer lag                |
 
 Host ports are shifted from the defaults so they don't clash with locally installed services;
 override them with `POSTGRES_PORT`, `REDIS_PORT`, `KAFKA_PORT`, etc.
@@ -91,10 +100,16 @@ override them with `POSTGRES_PORT`, `REDIS_PORT`, `KAFKA_PORT`, etc.
 Without `PAYLEDGER_JWT_SIGNING_KEY` (a private P-256 JWK), the core signs tokens with a random key generated at
 startup and logs a warning: tokens then die with the process. Fine locally, not for more than one instance.
 
+Logs are JSON lines (Elastic Common Schema). For plain text in a terminal, start a service with `LOG_FORMAT=`
+(empty), e.g. `LOG_FORMAT= ./mvnw spring-boot:run`.
+
 ## API
 
 Every endpoint except sign-up, sign-in, refresh, sign-out, the JWKS and the probes needs credentials: a bearer
 access token for people, an `X-API-Key` for machine clients. "Own" means accounts whose owner is the caller.
+
+Every response carries `X-Trace-Id` (quote it to support) and `x-fapi-interaction-id` (the caller's own UUID echoed
+back, as in FAPI / open banking, or a new one). A client may send a W3C `traceparent` to join a trace it started.
 
 ### Authentication
 
@@ -283,6 +298,30 @@ PayLedger: TK ...8b10 -250,000 VND luc 15:15 03/10/2026. SD: 750,000 VND. ND: Ti
 The text has no diacritics, because Vietnamese characters force Unicode SMS (70 characters per segment instead
 of 160). Delivery is simulated by logging.
 
+## Observability
+
+| | |
+|---|---|
+| **Business metrics** | Movements by type, status and failure code, payment volume, movement time and account lock wait as histograms (fleet-wide p95/p99), lock timeouts vs deadlocks, idempotent replays, outbox backlog and delivery delay, events consumed, deduplicated and dead-lettered. Counted **after commit**: a rolled-back movement never happened. Every bounded label set starts at zero, so the first occurrence is an increase an alert can see ([ADR 0013](docs/adr/0013-metrics-and-alerting.md)). |
+| **Consumer lag** | Measured by kafka-exporter from committed offsets on the broker, so a consumer that is down still shows its lag. |
+| **One trace per payment** | OpenTelemetry with W3C trace context. The outbox stores the request's `traceparent` in each event (CloudEvents Distributed Tracing extension); the relay continues that trace when it publishes, however much later, like Debezium's outbox router. Audit and notification continue it from the Kafka header ([ADR 0014](docs/adr/0014-trace-context-and-structured-logs.md)). |
+| **Logs** | JSON lines in Elastic Common Schema with `trace.id`, `span.id` and `fapi.interaction_id`; one line per committed movement with its ids and outcome, never amounts or descriptions. |
+| **Alerts** | Ten symptom-based Prometheus rules (money endpoints failing or slow, outbox stalled, audit gap, consumer lag, deadlocks, rate limiter failing open), each linked to a [runbook](docs/runbook.md) section and unit-tested with `promtool test rules` in CI. |
+| **Dashboards** | *Money movement* and *Events & platform*, provisioned from JSON in the repo. Latency panels have exemplars: a dot opens the trace of a request in that bucket. |
+
+A payment's trace in Jaeger:
+
+```
+POST /api/v1/transfers   →  X-Trace-Id: 55c429bf…
+└─ payledger-core        http post /api/v1/transfers
+   ├─ payledger-core        send payledger.transfers         transfer.created, published by the outbox relay
+   │  ├─ audit-service         payledger.transfers process
+   │  └─ notification-service  payledger.transfers process
+   └─ payledger-core        send payledger.transfers         transfer.completed
+      ├─ audit-service         payledger.transfers process
+      └─ notification-service  payledger.transfers process  → balance-change SMS
+```
+
 ## Testing
 
 ```bash
@@ -291,8 +330,9 @@ cd backend
 ```
 
 Each service builds and tests on its own (`./mvnw verify` in `backend`, `services/audit-service` and
-`services/notification-service`). CI runs all three in parallel. There are 243 tests: 194 in the core, 26 in the
-audit service and 23 in the notification service. Integration tests run against a real PostgreSQL, a real
+`services/notification-service`). CI runs all three in parallel, plus a job that checks the Prometheus config and
+unit-tests the alert rules with `promtool`. There are 263 tests: 210 in the core, 28 in the audit service and 25 in
+the notification service. Integration tests run against a real PostgreSQL, a real
 Kafka broker and a real Redis in Docker (Testcontainers), because locking, constraint and delivery behaviour cannot
 be verified with in-memory fakes. Requests go through the real security filters with real signed tokens.
 Highlights:
@@ -321,9 +361,18 @@ Highlights:
 - `AccessControlIntegrationTest` walks the role table and the object-level rules: someone else's account is 404, a
   transfer from it leaves no trace, an ADMIN cannot move customer money, only the bank's key can deposit.
 - `RateLimitIntegrationTest` freezes Redis with `docker pause`: requests keep flowing, then limiting resumes.
+- `TraceContextIntegrationTest` (core) sends a transfer with a `traceparent` and finds the same trace id in the
+  `X-Trace-Id` header, in the events stored in the outbox and in the Kafka record's header, under a new span of the
+  relay. The consumers' versions check that the audit record and the SMS are made within that trace.
+- `TransferMetricsIntegrationTest` checks what is counted and when: rejections by code, replays, lock timeouts, and
+  nothing for a movement whose transaction rolled back. `StructuredLoggingIntegrationTest` reads a transfer's ECS
+  log line back as JSON.
+- `infra/prometheus/alerts.test.yml`: an old outbox backlog pages after 2 minutes, a single deadlock or audit gap at
+  once; retry topics are not lag and 422 rejections are not errors.
 
 Several of these were checked by breaking the code on purpose: without the relay's ordering guard, the audit
-chain lock, the `processed_events` check or the row lock on sign-in, the corresponding tests fail.
+chain lock, the `processed_events` check, the row lock on sign-in, the trace stamp in the outbox, or with transfers
+counted before their commit, the corresponding tests fail.
 
 Locking benchmark (opt-in, results in [docs/benchmarks/locking.md](docs/benchmarks/locking.md)):
 
@@ -337,13 +386,16 @@ Demos against the real stack. Start the infrastructure and all three services fi
 ```bash
 scripts/demo-kafka-outage.sh
 scripts/demo-security.sh
+scripts/demo-observability.sh
 ```
 
 The first stops Kafka, makes 5 transfers (each completes in about 200 ms), shows the events waiting in the outbox,
 starts Kafka again, and then shows the outbox drained, the customer's SMS and the audit chain verified. The second
 shows a customer failing to spend or read someone else's account, a lockout after 5 wrong passwords and an
 operator unlocking it, a stolen refresh token ending the session, a burst of requests cut off with 429, and the
-victim's security trail in the audit service.
+victim's security trail in the audit service. The third makes a payment and follows its `X-Trace-Id` into the outbox,
+through Jaeger across the three services and into the audit trail, then sends a burst of payments, rejections and
+retries and prints what Prometheus measured.
 
 ## Roadmap
 
@@ -351,5 +403,5 @@ victim's security trail in the audit service.
 - [x] **Phase 2 – Money core:** deposits, transfers, double-entry ledger, pessimistic locking, idempotency keys, reversals
 - [x] **Phase 3 – Events:** transactional outbox, Kafka events, audit & notification consumers, DLQ
 - [x] **Phase 4 – Security:** JWT, refresh tokens, RBAC, API keys, rate limiting, security audit events
-- [ ] **Phase 5 – Observability:** business metrics, Grafana dashboards, correlation IDs
+- [x] **Phase 5 – Observability:** business metrics, tracing through the outbox, JSON logs, consumer lag, alerts, dashboards
 - [ ] **Phase 6 – Frontend & polish:** React UI, k6 load tests, deployment

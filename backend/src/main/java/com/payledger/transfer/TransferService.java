@@ -16,7 +16,8 @@ import java.util.UUID;
 /**
  * Executes money movements. Each one is a single database transaction (READ COMMITTED + row locks):
  * lock both accounts, check the rules, then either record a FAILED transfer or post the ledger entries,
- * update both balances and record a COMPLETED transfer. Nothing is ever half-applied.
+ * update both balances and record a COMPLETED transfer. The lifecycle events go to the outbox in the same
+ * transaction. Nothing is ever half-applied, and no event is ever published for a change that rolled back.
  */
 @Service
 public class TransferService {
@@ -25,13 +26,15 @@ public class TransferService {
     private final AccountRepository accounts;
     private final AccountLocker locker;
     private final LedgerService ledger;
+    private final TransferEvents events;
 
     public TransferService(TransferRepository transfers, AccountRepository accounts, AccountLocker locker,
-                           LedgerService ledger) {
+                           LedgerService ledger, TransferEvents events) {
         this.transfers = transfers;
         this.accounts = accounts;
         this.locker = locker;
         this.ledger = ledger;
+        this.events = events;
     }
 
     /**
@@ -44,14 +47,15 @@ public class TransferService {
                 .orElseThrow(() -> new BusinessRuleViolationException("UNSUPPORTED_CURRENCY",
                         "Currency " + currency + " is not supported"));
         requireDistinct(systemAccountId, accountId);
-        return execute(Transfer.deposit(systemAccountId, accountId, amount, currency, description));
+        return execute(Transfer.deposit(systemAccountId, accountId, amount, currency, description)).transfer();
     }
 
     @Transactional
     public Transfer transfer(UUID sourceAccountId, UUID destinationAccountId, long amount, String currency,
                              String description) {
         requireDistinct(sourceAccountId, destinationAccountId);
-        return execute(Transfer.transfer(sourceAccountId, destinationAccountId, amount, currency, description));
+        return execute(Transfer.transfer(sourceAccountId, destinationAccountId, amount, currency, description))
+                .transfer();
     }
 
     /**
@@ -78,11 +82,12 @@ public class TransferService {
                     "Only COMPLETED transfers can be reversed; transfer " + originalId + " is " + original.getStatus());
         }
 
-        Transfer reversal = execute(Transfer.reversalOf(original, reason));
-        if (reversal.getStatus() == TransferStatus.COMPLETED) {
+        Executed reversal = execute(Transfer.reversalOf(original, reason));
+        if (reversal.transfer().getStatus() == TransferStatus.COMPLETED) {
             original.markReversed();
+            events.reversed(original, reversal.transfer(), reversal.accounts());
         }
-        return reversal;
+        return reversal.transfer();
     }
 
     @Transactional(readOnly = true)
@@ -90,20 +95,27 @@ public class TransferService {
         return transfers.findById(id).orElseThrow(() -> new ResourceNotFoundException("Transfer", id));
     }
 
-    private Transfer execute(Transfer transfer) {
+    private Executed execute(Transfer transfer) {
         LockedPair locked = locker.lock(transfer.getSourceAccountId(), transfer.getDestinationAccountId());
+        events.created(transfer, locked);
 
         Optional<Rejection> rejection = TransferRules.check(transfer, locked.source(), locked.destination());
         if (rejection.isPresent()) {
             transfer.fail(rejection.get().code(), rejection.get().reason());
-            return transfers.save(transfer);
+            transfers.save(transfer);
+            events.failed(transfer, locked);
+            return new Executed(transfer, locked);
         }
 
         transfer.complete();
         // Persist the transfer before its entries: they reference it by foreign key.
         transfers.saveAndFlush(transfer);
         ledger.post(transfer.getId(), locked.source(), locked.destination(), transfer.getAmount());
-        return transfer;
+        events.completed(transfer, locked);
+        return new Executed(transfer, locked);
+    }
+
+    private record Executed(Transfer transfer, LockedPair accounts) {
     }
 
     private static void requireDistinct(UUID source, UUID destination) {

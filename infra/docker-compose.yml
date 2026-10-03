@@ -19,6 +19,40 @@ services:
       timeout: 3s
       retries: 10
 
+  # Database per service: the audit trail lives apart from the core database it audits.
+  audit-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: audit
+      POSTGRES_USER: audit_owner
+      POSTGRES_PASSWORD: audit_owner
+    ports:
+      - "${AUDIT_POSTGRES_PORT:-15433}:5432"
+    volumes:
+      - audit-postgres-data:/var/lib/postgresql/data
+      - ./postgres/audit-init.sql:/docker-entrypoint-initdb.d/audit-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audit_owner -d audit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  notification-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: notification
+      POSTGRES_USER: notification
+      POSTGRES_PASSWORD: notification
+    ports:
+      - "${NOTIFICATION_POSTGRES_PORT:-15434}:5432"
+    volumes:
+      - notification-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notification -d notification"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   redis:
     image: redis:7.4-alpine
     ports:
@@ -89,4 +123,6 @@ services:
 
 volumes:
   postgres-data:
+  audit-postgres-data:
+  notification-postgres-data:
   grafana-data:

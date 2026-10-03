@@ -11,6 +11,7 @@ import com.payledger.security.Role;
 import com.payledger.support.LedgerInvariants;
 import com.payledger.transfer.TransferService;
 import com.payledger.transfer.TransferStatus;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -224,8 +225,8 @@ class LockingBenchmarkTest {
         private final AccountRepository accounts;
         private volatile Strategy strategy = Strategy.PESSIMISTIC;
 
-        SwitchableAccountLocker(AccountRepository accounts, EntityManager entityManager) {
-            super(accounts, entityManager, Duration.ofSeconds(3));
+        SwitchableAccountLocker(AccountRepository accounts, EntityManager entityManager, MeterRegistry meters) {
+            super(accounts, entityManager, meters, Duration.ofSeconds(3));
             this.accounts = accounts;
         }
 
@@ -256,8 +257,9 @@ class LockingBenchmarkTest {
 
         @Bean
         @Primary
-        SwitchableAccountLocker switchableAccountLocker(AccountRepository accounts, EntityManager entityManager) {
-            return new SwitchableAccountLocker(accounts, entityManager);
+        SwitchableAccountLocker switchableAccountLocker(AccountRepository accounts, EntityManager entityManager,
+                                                        MeterRegistry meters) {
+            return new SwitchableAccountLocker(accounts, entityManager, meters);
         }
     }
 }

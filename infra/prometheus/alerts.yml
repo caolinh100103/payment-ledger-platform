@@ -1,0 +1,120 @@
+# Alerting rules. Alerts fire on symptoms that need a person (money not moving, events not delivered, an audit gap),
+# not on every metric that moves. Each one links to its section of docs/runbook.md.
+# Unit tests: alerts.test.yml (promtool test rules), run in CI.
+groups:
+  - name: payledger-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"payledger-core|audit-service|notification-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is not answering Prometheus"
+          description: "{{ $labels.instance }} has failed every scrape for a minute."
+          runbook: docs/runbook.md#servicedown
+
+      - alert: MoneyMovementErrors
+        # 5xx on the money endpoints. Business rejections (422, e.g. INSUFFICIENT_FUNDS) are not errors.
+        expr: |
+          sum(rate(http_server_requests_seconds_count{application="payledger-core", uri=~"/api/v1/(transfers|deposits).*", status=~"5.."}[5m]))
+            /
+          sum(rate(http_server_requests_seconds_count{application="payledger-core", uri=~"/api/v1/(transfers|deposits).*"}[5m]))
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of money movements fail with a server error"
+          description: "{{ $value | humanizePercentage }} of transfer and deposit requests returned 5xx over 5 minutes."
+          runbook: docs/runbook.md#moneymovementerrors
+
+      - alert: MoneyMovementSlow
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(payledger_transfer_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 of money movements is above 1 s"
+          description: "p99 is {{ $value | humanizeDuration }}. Compare with payledger_account_lock_wait_seconds: a hot account?"
+          runbook: docs/runbook.md#moneymovementslow
+
+  - name: payledger-ledger
+    rules:
+      - alert: AccountLockTimeouts
+        expr: sum(increase(payledger_lock_failures_total{reason="lock_timeout"}[5m])) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Money movements time out waiting for account locks"
+          description: "{{ $value }} lock timeouts (503 LOCK_TIMEOUT) in 5 minutes."
+          runbook: docs/runbook.md#accountlocktimeouts
+
+      - alert: DeadlockDetected
+        # Locks are always taken in ascending account id order (ADR 0004), so this should never happen.
+        expr: sum(increase(payledger_lock_failures_total{reason="deadlock"}[15m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL aborted a deadlock between money movements"
+          description: "The lock ordering of ADR 0004 is broken somewhere: a code change locks rows in another order."
+          runbook: docs/runbook.md#deadlockdetected
+
+  - name: payledger-events
+    rules:
+      - alert: OutboxStalled
+        # A large backlog that moves is fine; an old one means Kafka is down, the relay is stuck, or a poison
+        # event holds back its transfer.
+        expr: max(payledger_outbox_oldest_pending_age_seconds) > 60
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Events are not reaching Kafka"
+          description: "The oldest unpublished outbox event is {{ $value | humanizeDuration }} old."
+          runbook: docs/runbook.md#outboxstalled
+
+      - alert: AuditGap
+        expr: sum by (topic) (increase(payledger_events_dead_lettered_total{application="audit-service"}[10m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "An event could not be recorded in the audit trail"
+          description: "{{ $value }} event(s) from {{ $labels.topic }} were parked on the audit dead-letter topic."
+          runbook: docs/runbook.md#auditgap
+
+      - alert: NotificationsDeadLettered
+        expr: sum by (topic) (increase(payledger_events_dead_lettered_total{application="notification-service"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Customers did not get balance-change messages"
+          description: "{{ $value }} event(s) from {{ $labels.topic }} were parked on the notification dead-letter topic."
+          runbook: docs/runbook.md#notificationsdeadlettered
+
+      - alert: ConsumerLagHigh
+        # Measured by kafka-exporter from committed offsets, so a consumer that is down still shows up here.
+        # Retry topics are excluded: their messages wait for their back-off on purpose. A partition without a
+        # committed offset reports -1, hence the clamp.
+        expr: sum by (consumergroup, topic) (clamp_min(kafka_consumergroup_lag{topic!~".*-retry-[0-9]+"}, 0)) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.consumergroup }} is falling behind on {{ $labels.topic }}"
+          description: "{{ $value }} messages are waiting to be consumed."
+          runbook: docs/runbook.md#consumerlaghigh
+
+  - name: payledger-security
+    rules:
+      - alert: RateLimiterFailingOpen
+        # Redis is down or slow: requests are served without limits (ADR 0012). Lockout still stops password guessing.
+        expr: sum(rate(payledger_rate_limit_requests_total{outcome="bypassed"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limits are not enforced"
+          description: "The rate limiter is letting requests through unchecked because Redis is unavailable."
+          runbook: docs/runbook.md#ratelimiterfailingopen

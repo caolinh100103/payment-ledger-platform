@@ -18,6 +18,7 @@ consumers ([audit-service](../services/audit-service), [notification-service](..
 | `content-type` header | `application/cloudevents+json; charset=UTF-8` ([Kafka protocol binding](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/bindings/kafka-protocol-binding.md)) |
 | Delivery | **At least once.** The same event can arrive more than once; deduplicate on `id`. |
 | Ordering | Guaranteed per aggregate (transfer, account, user, API key), not across aggregates. |
+| `traceparent` header | W3C trace context of the relay's publish span, a child of the event's own `traceparent` attribute. Consumers continue the trace from it ([ADR 0014](adr/0014-trace-context-and-structured-logs.md)). |
 
 Events are written to an outbox table in the same database transaction as the change they describe, then
 relayed to Kafka ([ADR 0003](adr/0003-synchronous-ledger-with-outbox.md), [ADR 0007](adr/0007-polling-outbox-relay.md)).
@@ -36,6 +37,8 @@ An event is published if and only if its change committed.
 | `datacontenttype` | `application/json` | |
 | `schemaversion` | `1` | Extension attribute: version of `data` for this `type` |
 | `actor` | `user:3f2a…` | Extension attribute: who caused it, see below |
+| `traceparent` | `00-62f0…34e2-dd29…f55e-03` | [Distributed Tracing extension](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/extensions/distributed-tracing.md): the W3C trace context of the request that caused the event. Absent if nothing was traced. |
+| `tracestate` | | Same extension, only when the trace carries vendor state |
 | `data` | `{…}` | Snapshot of the aggregate, see below |
 
 ### `actor`

@@ -7,3 +7,16 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    jsonData:
+      # Matches prometheus.yml, so $__rate_interval always spans enough scrapes.
+      timeInterval: 15s
+      # Micrometer attaches trace_id exemplars to histogram buckets: clicking one opens the trace in Jaeger.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686

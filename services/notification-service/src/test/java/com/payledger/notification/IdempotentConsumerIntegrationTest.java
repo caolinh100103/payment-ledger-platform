@@ -26,9 +26,15 @@ class IdempotentConsumerIntegrationTest extends ConsumerTestSupport {
     @Test
     void redeliveredEventIsNotNotifiedAgain() {
         TransferEvent event = completedTransfer();
+        double duplicates = count("payledger.events.consumed", "outcome", "duplicate");
+        double sms = count("payledger.notifications.sent", "channel", "SMS");
 
         assertThat(notifier.handle(event)).hasSize(2);
         assertThat(notifier.handle(event)).isEmpty();
+
+        // At least: events of earlier tests may still be retrying in the background.
+        assertThat(count("payledger.events.consumed", "outcome", "duplicate")).isGreaterThanOrEqualTo(duplicates + 1);
+        assertThat(count("payledger.notifications.sent", "channel", "SMS")).isGreaterThanOrEqualTo(sms + 2);
 
         assertThat(store.findByEvent(event.id())).hasSize(2);
         verify(sender, times(2)).send(argThat(n -> n.eventId().equals(event.id())));

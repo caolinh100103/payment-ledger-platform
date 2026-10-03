@@ -1,5 +1,7 @@
 package com.payledger.notification;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -59,6 +61,9 @@ abstract class ConsumerTestSupport {
     @MockitoSpyBean
     NotificationSender sender;
 
+    @Autowired
+    MeterRegistry meters;
+
     @BeforeEach
     void resetSender() {
         reset(sender);
@@ -92,6 +97,11 @@ abstract class ConsumerTestSupport {
         // The header is incremented on every forward, including the last one to the dead-letter topic.
         return ByteBuffer.wrap(record.headers().lastHeader(RetryTopicHeaders.DEFAULT_HEADER_ATTEMPTS).value()).getInt()
                 - 1;
+    }
+
+    double count(String name, String... tags) {
+        Counter counter = meters.find(name).tags(tags).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     static String header(ConsumerRecord<?, ?> record, String name) {

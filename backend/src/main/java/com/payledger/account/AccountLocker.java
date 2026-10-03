@@ -1,6 +1,8 @@
 package com.payledger.account;
 
 import com.payledger.common.error.ResourceNotFoundException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.persistence.EntityManager;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -9,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Pessimistically locks the two accounts of a money movement.
@@ -20,6 +23,10 @@ import java.util.UUID;
  *
  * <p>A lock wait is bounded by {@code lock_timeout} so a stuck transaction makes callers fail fast with a
  * retryable error instead of piling up and exhausting the connection pool.
+ *
+ * <p>{@code payledger_account_lock_wait_seconds} times every acquisition. Its p99 rising while the transfer rate stays
+ * flat is the signature of a "hot" account that many transfers queue on (ADR 0004). Waits that end in a timeout are
+ * counted by {@code payledger_lock_failures_total} instead.
  */
 @Component
 public class AccountLocker {
@@ -27,12 +34,19 @@ public class AccountLocker {
     private final AccountRepository accounts;
     private final EntityManager entityManager;
     private final Duration lockTimeout;
+    private final Timer lockWait;
 
-    public AccountLocker(AccountRepository accounts, EntityManager entityManager,
+    public AccountLocker(AccountRepository accounts, EntityManager entityManager, MeterRegistry meters,
                          @Value("${payledger.ledger.lock-timeout:3s}") Duration lockTimeout) {
         this.accounts = accounts;
         this.entityManager = entityManager;
         this.lockTimeout = lockTimeout;
+        this.lockWait = Timer.builder("payledger.account.lock.wait")
+                .description("Time to lock both accounts of a money movement")
+                .publishPercentileHistogram()
+                .minimumExpectedValue(Duration.ofMillis(1))
+                .maximumExpectedValue(lockTimeout.multipliedBy(2))
+                .register(meters);
     }
 
     /**
@@ -46,9 +60,11 @@ public class AccountLocker {
                 .setParameter("timeout", lockTimeout.toMillis() + "ms")
                 .getSingleResult();
 
+        long start = System.nanoTime();
         boolean sourceFirst = sourceId.compareTo(destinationId) < 0;
         Account first = lockOne(sourceFirst ? sourceId : destinationId);
         Account second = lockOne(sourceFirst ? destinationId : sourceId);
+        lockWait.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         return sourceFirst ? new LockedPair(first, second) : new LockedPair(second, first);
     }
 

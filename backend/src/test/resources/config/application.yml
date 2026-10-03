@@ -14,3 +14,9 @@ payledger:
       anonymous:
         capacity: 1000000
         period: 1m
+management:
+  tracing:
+    export:
+      otlp:
+        # Spans are still created and propagated (the trace context tests rely on it), just not sent anywhere.
+        enabled: false

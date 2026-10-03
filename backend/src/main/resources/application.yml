@@ -23,6 +23,8 @@ spring:
       port: ${REDIS_PORT:16379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    # template.observation-enabled stays false: the outbox relay creates the publish span itself, as a child of the
+    # request that wrote the event, and puts its trace context in the record headers (OutboxTracing).
     producer:
       # Wait for all in-sync replicas; with idempotence, broker-side retries cannot duplicate or reorder
       # messages within a partition.
@@ -37,13 +39,24 @@ spring:
   task:
     scheduling:
       pool:
-        # The outbox relay blocks while Kafka is down; housekeeping jobs must not wait behind it.
-        size: 2
+        # The outbox relay blocks while Kafka is down. The backlog metrics must keep updating exactly then, and
+        # housekeeping jobs must not wait behind it either.
+        size: 3
 
 server:
   port: ${SERVER_PORT:8080}
 
 logging:
+  structured:
+    format:
+      # JSON lines in Elastic Common Schema (ECS), for a log pipeline (Filebeat, Fluent Bit, Grafana Alloy). Each line
+      # carries the trace and span ids. For plain text in a terminal, start the service with LOG_FORMAT= (empty).
+      console: ${LOG_FORMAT:ecs}
+    json:
+      rename:
+        # ECS field names for the trace context, so Kibana and Elastic APM link each line to its trace.
+        "[traceId]": trace.id
+        "[spanId]": span.id
   level:
     # OutboxRelay reports failed sends itself: one line per batch, without event payloads (personal data).
     org.springframework.kafka.support.LoggingProducerListener: "off"
@@ -61,9 +74,34 @@ management:
     redis:
       # Redis only backs the rate limiter, which fails open: it being down must not mark the service unhealthy.
       enabled: false
+  tracing:
+    sampling:
+      # Every request is traced here. Production usually keeps a fraction, or lets a collector keep the slow and failed
+      # ones (tail sampling). Trace ids reach the logs and X-Trace-Id whether or not a trace is sampled.
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Jaeger in infra/docker-compose.yml takes OTLP over HTTP.
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        # Prometheus scrapes /actuator/prometheus; the OpenTelemetry starter's OTLP metrics push stays off.
+        enabled: false
   metrics:
     tags:
       application: ${spring.application.name}
+    distribution:
+      # Histogram buckets instead of client-side percentiles: buckets from every instance can be summed, then
+      # histogram_quantile() gives the fleet's p95/p99. Percentiles averaged across instances mean nothing.
+      percentiles-histogram:
+        "[http.server.requests]": true
+      minimum-expected-value:
+        "[http.server.requests]": 1ms
+      maximum-expected-value:
+        "[http.server.requests]": 10s
 
 payledger:
   security:
@@ -126,6 +164,8 @@ payledger:
     # Published rows are kept this long for debugging and replay, then deleted.
     retention: 7d
     cleanup-interval: PT10M
+    # How often payledger_outbox_pending and payledger_outbox_oldest_pending_age_seconds are refreshed.
+    metrics-interval: PT10S
   ledger:
     # Max wait for an account row lock; beyond it the request fails fast with a retryable 503.
     lock-timeout: 3s

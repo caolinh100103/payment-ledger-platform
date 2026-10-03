@@ -6,6 +6,8 @@ import com.payledger.account.AccountLocker;
 import com.payledger.account.AccountRepository;
 import com.payledger.account.AccountService;
 import com.payledger.common.error.ResourceNotFoundException;
+import com.payledger.security.Actor;
+import com.payledger.security.Role;
 import com.payledger.support.LedgerInvariants;
 import com.payledger.transfer.TransferService;
 import com.payledger.transfer.TransferStatus;
@@ -27,6 +29,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +57,9 @@ class LockingBenchmarkTest {
     private static final int THREADS = 32;
     private static final int TRANSFERS_PER_THREAD = 100;
     private static final int MAX_OPTIMISTIC_ATTEMPTS = 20;
+    /** Owns every account, so any pair can be transferred between. */
+    private static final Actor OWNER = new Actor(Actor.Kind.USER, UUID.randomUUID().toString(),
+            Set.of(Role.CUSTOMER.authority()));
 
     enum Strategy { PESSIMISTIC, OPTIMISTIC }
 
@@ -162,7 +168,7 @@ class LockingBenchmarkTest {
     private int transferWithRetry(Strategy strategy, UUID from, UUID to) throws InterruptedException {
         for (int attempt = 1; attempt <= MAX_OPTIMISTIC_ATTEMPTS; attempt++) {
             try {
-                var transfer = transfers.transfer(from, to, 1, "VND", null);
+                var transfer = transfers.transfer(OWNER, from, to, 1, "VND", null);
                 assertThat(transfer.getStatus()).isEqualTo(TransferStatus.COMPLETED);
                 return attempt;
             } catch (ConcurrencyFailureException conflict) {
@@ -180,8 +186,8 @@ class LockingBenchmarkTest {
     private List<UUID> fundedAccounts(int count) {
         List<UUID> ids = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            UUID id = accountService.open("bench-" + UUID.randomUUID(), "VND").getId();
-            transfers.deposit(id, 1_000_000_000L, "VND", null);
+            UUID id = accountService.open(OWNER, "VND").getId();
+            transfers.deposit(Actor.SYSTEM, id, 1_000_000_000L, "VND", null);
             ids.add(id);
         }
         return ids;

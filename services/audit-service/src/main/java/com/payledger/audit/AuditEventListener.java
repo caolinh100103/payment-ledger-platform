@@ -16,13 +16,14 @@ import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Records every event published on the domain topics. Kafka delivers at least once, so a redelivered event is
+ * Records every event published on the domain topics: {@code payledger.transfers}, {@code payledger.accounts} and
+ * {@code payledger.security}, into one hash chain. Kafka delivers at least once, so a redelivered event is
  * recognised by its id and not recorded twice. The offset is committed only after the row is committed.
  *
  * <p>Failures are retried without blocking the topic (ADR 0008): after 2 s, 6 s, 18 s and 54 s on
- * {@code payledger.transfers-audit-retry-0..3}, typically riding out a database failover. An event that still
- * fails, or can never be recorded (not a CloudEvent), is parked on {@code payledger.transfers-audit-dlt}. A gap
- * in the audit trail is a compliance incident, so that is logged as an error for the on-call engineer.
+ * {@code <topic>-audit-retry-0..3}, typically riding out a database failover. An event that still fails, or can
+ * never be recorded (not a CloudEvent), is parked on {@code <topic>-audit-dlt}. A gap in the audit trail is a
+ * compliance incident, so that is logged as an error for the on-call engineer.
  */
 @Component
 class AuditEventListener {
@@ -49,7 +50,7 @@ class AuditEventListener {
             exclude = MalformedEventException.class,
             traversingCauses = "true")
     // idIsGroup = false: the consumer group is spring.kafka.consumer.group-id, not the listener id.
-    @KafkaListener(id = "audit", idIsGroup = false, topics = "${payledger.audit.topic}")
+    @KafkaListener(id = "audit", idIsGroup = false, topics = "#{'${payledger.audit.topics}'.split(',')}")
     void onEvent(ConsumerRecord<String, String> record) {
         AuditableEvent event = AuditableEvent.parse(record.value(), json);
         if (auditLog.append(event)) {

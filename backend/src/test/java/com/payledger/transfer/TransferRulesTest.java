@@ -50,7 +50,7 @@ class TransferRulesTest {
     @Test
     void depositMayOverdrawTheSystemAccount() {
         Account system = system("VND");
-        Transfer deposit = Transfer.deposit(system.getId(), bob.getId(), 5_000, "VND", null);
+        Transfer deposit = Transfer.deposit(system.getId(), bob.getId(), 5_000, "VND", null, "apikey:test");
 
         assertThat(TransferRules.check(deposit, system, bob)).isEmpty();
     }
@@ -58,7 +58,7 @@ class TransferRulesTest {
     @Test
     void reversalIsAllowedOnFrozenAccounts() {
         Transfer original = transfer(alice, bob, 500);
-        Transfer reversal = Transfer.reversalOf(original, "fraud");
+        Transfer reversal = Transfer.reversalOf(original, "fraud", "user:operator");
         ReflectionTestUtils.setField(bob, "balance", 500L);
 
         bob.freeze();
@@ -69,7 +69,7 @@ class TransferRulesTest {
     void reversalIsRejectedWhenAnAccountIsClosed() {
         Account empty = customer("VND", 0);
         Transfer original = transfer(empty, bob, 500);
-        Transfer reversal = Transfer.reversalOf(original, "fraud");
+        Transfer reversal = Transfer.reversalOf(original, "fraud", "user:operator");
         ReflectionTestUtils.setField(bob, "balance", 500L);
         empty.close();
 
@@ -80,14 +80,14 @@ class TransferRulesTest {
     @Test
     void reversalStillNeedsFundsOnACustomerAccount() {
         Transfer original = transfer(alice, bob, 500);
-        Transfer reversal = Transfer.reversalOf(original, "fraud");
+        Transfer reversal = Transfer.reversalOf(original, "fraud", "user:operator");
 
         assertThat(TransferRules.check(reversal, bob, alice))
                 .hasValueSatisfying(r -> assertThat(r.code()).isEqualTo("INSUFFICIENT_FUNDS"));
     }
 
     private static Transfer transfer(Account from, Account to, long amount) {
-        return Transfer.transfer(from.getId(), to.getId(), amount, "VND", null);
+        return Transfer.transfer(from.getId(), to.getId(), amount, "VND", null, "user:test");
     }
 
     private static Account customer(String currency, long balance) {

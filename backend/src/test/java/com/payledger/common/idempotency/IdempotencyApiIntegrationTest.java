@@ -1,5 +1,6 @@
 package com.payledger.common.idempotency;
 
+import com.payledger.security.Role;
 import com.payledger.support.ApiTestSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,8 +34,8 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
         String key = UUID.randomUUID().toString();
         String body = transferBody(alice, bob, 300_000, "VND");
 
-        MvcTestResult first = postWithKey("/api/v1/transfers", key, body);
-        MvcTestResult retry = postWithKey("/api/v1/transfers", key, body);
+        MvcTestResult first = postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
+        MvcTestResult retry = postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
 
         assertThat(first).hasStatus(HttpStatus.CREATED);
         assertThat(first).headers().doesNotContainHeader("Idempotent-Replayed");
@@ -51,9 +52,10 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
         String alice = fundedAccount("VND", 1_000_000);
         String bob = openAccount("VND");
         String key = UUID.randomUUID().toString();
-        postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 1_000, "VND"));
+        postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 1_000, "VND"), asOwnerOf(alice));
 
-        MvcTestResult reused = postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 2_000, "VND"));
+        MvcTestResult reused = postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 2_000, "VND"),
+                asOwnerOf(alice));
 
         assertThat(reused).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
@@ -61,17 +63,43 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
     }
 
     @Test
-    void sameKeyOnAnotherEndpointIsRejected() {
+    void sameKeyOnAnotherPathIsRejected() {
         String alice = fundedAccount("VND", 1_000_000);
         String bob = openAccount("VND");
+        String first = jsonPath(transfer(alice, bob, 1_000, "VND"), "$.id");
+        String second = jsonPath(transfer(alice, bob, 2_000, "VND"), "$.id");
+        String operator = newCustomer();
         String key = UUID.randomUUID().toString();
-        postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 1_000, "VND"));
+        String sameBody = """
+                {"reason": "Customer dispute"}
+                """;
+        postWithKey("/api/v1/transfers/" + first + "/reversals", key, sameBody, asUser(operator, Role.OPERATOR));
 
-        assertThat(postWithKey("/api/v1/deposits", key, """
-                {"accountId": "%s", "amount": 1000, "currency": "VND"}
-                """.formatted(bob)))
+        assertThat(postWithKey("/api/v1/transfers/" + second + "/reversals", key, sameBody,
+                asUser(operator, Role.OPERATOR)))
                 .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
+    }
+
+    /** As at Stripe, a key belongs to the client that sent it: another client picking the same key is unaffected. */
+    @Test
+    void keysAreScopedToTheClient() {
+        String alice = fundedAccount("VND", 1_000_000);
+        String bob = fundedAccount("VND", 1_000_000);
+        String carol = openAccount("VND");
+        String key = UUID.randomUUID().toString();
+
+        MvcTestResult alicesTransfer = postWithKey("/api/v1/transfers", key, transferBody(alice, carol, 1_000, "VND"),
+                asOwnerOf(alice));
+        MvcTestResult bobsTransfer = postWithKey("/api/v1/transfers", key, transferBody(bob, carol, 2_000, "VND"),
+                asOwnerOf(bob));
+
+        assertThat(alicesTransfer).hasStatus(HttpStatus.CREATED);
+        assertThat(bobsTransfer).hasStatus(HttpStatus.CREATED);
+        assertThat(bobsTransfer).headers().doesNotContainHeader("Idempotent-Replayed");
+        assertThat(balanceOf(carol)).isEqualTo(3_000);
+        assertThat(jdbc.queryForList("SELECT scope FROM idempotency_keys WHERE idempotency_key = ?", String.class, key))
+                .containsExactlyInAnyOrder("user:" + ownerOf(alice), "user:" + ownerOf(bob));
     }
 
     @Test
@@ -81,9 +109,9 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
         String key = UUID.randomUUID().toString();
         String body = transferBody(alice, bob, 50_000, "VND");
 
-        MvcTestResult first = postWithKey("/api/v1/transfers", key, body);
+        MvcTestResult first = postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
         deposit(alice, 100_000, "VND");
-        MvcTestResult retry = postWithKey("/api/v1/transfers", key, body);
+        MvcTestResult retry = postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
 
         assertThat(first).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("INSUFFICIENT_FUNDS");
@@ -99,9 +127,10 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
         String bob = openAccount("VND");
         String key = UUID.randomUUID().toString();
 
-        assertThat(postWithKey("/api/v1/transfers", key, transferBody(alice, UUID.randomUUID().toString(), 1_000, "VND")))
+        assertThat(postWithKey("/api/v1/transfers", key, transferBody(alice, UUID.randomUUID().toString(), 1_000, "VND"),
+                asOwnerOf(alice)))
                 .hasStatus(HttpStatus.NOT_FOUND);
-        assertThat(postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 1_000, "VND")))
+        assertThat(postWithKey("/api/v1/transfers", key, transferBody(alice, bob, 1_000, "VND"), asOwnerOf(alice)))
                 .hasStatus(HttpStatus.CREATED);
     }
 
@@ -111,14 +140,17 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
         String bob = openAccount("VND");
 
         assertThat(mvc.post().uri("/api/v1/transfers")
+                .with(asOwnerOf(alice))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(transferBody(alice, bob, 1_000, "VND")))
                 .hasStatus(HttpStatus.BAD_REQUEST)
                 .bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_MISSING");
-        assertThat(postWithKey("/api/v1/transfers", "has spaces", transferBody(alice, bob, 1_000, "VND")))
+        assertThat(postWithKey("/api/v1/transfers", "has spaces", transferBody(alice, bob, 1_000, "VND"),
+                asOwnerOf(alice)))
                 .hasStatus(HttpStatus.BAD_REQUEST)
                 .bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_INVALID");
-        assertThat(postWithKey("/api/v1/transfers", "k".repeat(256), transferBody(alice, bob, 1_000, "VND")))
+        assertThat(postWithKey("/api/v1/transfers", "k".repeat(256), transferBody(alice, bob, 1_000, "VND"),
+                asOwnerOf(alice)))
                 .hasStatus(HttpStatus.BAD_REQUEST);
         assertThat(balanceOf(alice)).isEqualTo(100_000);
     }
@@ -138,10 +170,10 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
                 lock.executeQuery();
             }
             CompletableFuture<MvcTestResult> first = CompletableFuture.supplyAsync(
-                    () -> postWithKey("/api/v1/transfers", key, body));
+                    () -> postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice)));
             awaitKeyClaimed(key);
 
-            MvcTestResult second = postWithKey("/api/v1/transfers", key, body);
+            MvcTestResult second = postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
 
             assertThat(second).hasStatus(HttpStatus.CONFLICT)
                     .bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_IN_PROGRESS");
@@ -167,7 +199,7 @@ class IdempotencyApiIntegrationTest extends ApiTestSupport {
             for (int i = 0; i < threads; i++) {
                 futures.add(pool.submit(() -> {
                     start.await();
-                    return postWithKey("/api/v1/transfers", key, body);
+                    return postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
                 }));
             }
             start.countDown();

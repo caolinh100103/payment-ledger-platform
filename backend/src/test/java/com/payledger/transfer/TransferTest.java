@@ -14,7 +14,7 @@ class TransferTest {
 
     @Test
     void startsPendingAndCompletes() {
-        Transfer transfer = Transfer.transfer(a, b, 100, "VND", "rent");
+        Transfer transfer = Transfer.transfer(a, b, 100, "VND", "rent", "user:test");
         assertThat(transfer.getStatus()).isEqualTo(TransferStatus.PENDING);
 
         transfer.complete();
@@ -25,7 +25,7 @@ class TransferTest {
 
     @Test
     void failureKeepsCodeAndReason() {
-        Transfer transfer = Transfer.transfer(a, b, 100, "VND", null);
+        Transfer transfer = Transfer.transfer(a, b, 100, "VND", null, "user:test");
 
         transfer.fail("INSUFFICIENT_FUNDS", "not enough");
 
@@ -35,11 +35,11 @@ class TransferTest {
 
     @Test
     void onlyCompletedTransfersCanBeReversed() {
-        Transfer failed = Transfer.transfer(a, b, 100, "VND", null);
+        Transfer failed = Transfer.transfer(a, b, 100, "VND", null, "user:test");
         failed.fail("INSUFFICIENT_FUNDS", "not enough");
         assertThatThrownBy(failed::markReversed).isInstanceOf(IllegalStateException.class);
 
-        Transfer completed = Transfer.transfer(a, b, 100, "VND", null);
+        Transfer completed = Transfer.transfer(a, b, 100, "VND", null, "user:test");
         completed.complete();
         completed.markReversed();
         assertThat(completed.getStatus()).isEqualTo(TransferStatus.REVERSED);
@@ -48,9 +48,9 @@ class TransferTest {
 
     @Test
     void reversalMovesTheSameAmountTheOtherWay() {
-        Transfer original = Transfer.transfer(a, b, 100, "VND", null);
+        Transfer original = Transfer.transfer(a, b, 100, "VND", null, "user:test");
 
-        Transfer reversal = Transfer.reversalOf(original, "customer dispute");
+        Transfer reversal = Transfer.reversalOf(original, "customer dispute", "user:operator");
 
         assertThat(reversal.getType()).isEqualTo(TransferType.REVERSAL);
         assertThat(reversal.getSourceAccountId()).isEqualTo(b);
@@ -61,7 +61,7 @@ class TransferTest {
 
     @Test
     void rejectsInvalidAmountsAndSameAccount() {
-        assertThatThrownBy(() -> Transfer.transfer(a, b, 0, "VND", null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Transfer.transfer(a, a, 1, "VND", null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Transfer.transfer(a, b, 0, "VND", null, "user:test")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Transfer.transfer(a, a, 1, "VND", null, "user:test")).isInstanceOf(IllegalArgumentException.class);
     }
 }

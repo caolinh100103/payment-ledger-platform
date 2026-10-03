@@ -33,6 +33,28 @@ class AuditEventListenerIntegrationTest {
     @Autowired
     MockMvcTester mvc;
 
+    @Autowired
+    TestJwtIssuer tokens;
+
+    /** Who froze an account, and who failed to sign in, go into the same chain as the money movements. */
+    @Test
+    void recordsAccountAndSecurityEventsInTheSameChain() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String user = UUID.randomUUID().toString();
+
+        kafka.send("payledger.accounts", account, AuditTestEvents.cloudEvent(UUID.randomUUID(),
+                "com.payledger.account.frozen", account, "user:operator-1")).get();
+        kafka.send("payledger.security", user, AuditTestEvents.cloudEvent(UUID.randomUUID(),
+                "com.payledger.user.sign_in_failed", user, "anonymous")).get();
+
+        await().atMost(Duration.ofSeconds(30)).until(() -> auditLog.findByResource(account, 10).size() == 1
+                && auditLog.findByResource(user, 10).size() == 1);
+        assertThat(auditLog.findByResource(account, 10).getFirst().event().actor()).isEqualTo("user:operator-1");
+        assertThat(auditLog.findByResource(user, 10).getFirst().event().action())
+                .isEqualTo("com.payledger.user.sign_in_failed");
+        assertThat(auditLog.verify().valid()).isTrue();
+    }
+
     @Test
     void recordsEachEventOfATransfer() throws Exception {
         String transfer = UUID.randomUUID().toString();
@@ -49,7 +71,8 @@ class AuditEventListenerIntegrationTest {
             assertThat(r.event().actor()).isEqualTo("anonymous");
             assertThat(r.event().source()).isEqualTo("/payledger/core");
         });
-        assertThat(mvc.get().uri("/api/v1/audit-events?resourceId={id}", transfer))
+        assertThat(mvc.get().uri("/api/v1/audit-events?resourceId={id}", transfer)
+                .header("Authorization", tokens.bearer("auditor-1", "AUDITOR")))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$[1].event.data.amount").isEqualTo(250000);
     }
@@ -74,7 +97,8 @@ class AuditEventListenerIntegrationTest {
     void verificationEndpointReportsTheChainHead() {
         auditLog.append(AuditTestEvents.event(UUID.randomUUID().toString()));
 
-        assertThat(mvc.get().uri("/api/v1/audit-events/verification"))
+        assertThat(mvc.get().uri("/api/v1/audit-events/verification")
+                .header("Authorization", tokens.bearer("auditor-1", "AUDITOR")))
                 .hasStatusOk()
                 .bodyJson()
                 .satisfies(json -> {

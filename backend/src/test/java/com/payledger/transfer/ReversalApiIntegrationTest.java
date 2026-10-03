@@ -35,7 +35,7 @@ class ReversalApiIntegrationTest extends ApiTestSupport {
         assertThat(balanceOf(alice)).isEqualTo(1_000_000);
         assertThat(balanceOf(bob)).isZero();
 
-        assertThat(mvc.get().uri("/api/v1/transfers/{id}", original))
+        assertThat(mvc.get().uri("/api/v1/transfers/{id}", original).with(asOperator()))
                 .bodyJson().extractingPath("$.status").isEqualTo("REVERSED");
         // The original entries are untouched; the reversal adds its own pair.
         assertThat(entryIds(original)).isEqualTo(originalEntryIds);
@@ -99,7 +99,7 @@ class ReversalApiIntegrationTest extends ApiTestSupport {
 
         assertThat(failed).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("INSUFFICIENT_FUNDS");
-        assertThat(mvc.get().uri("/api/v1/transfers/{id}", original))
+        assertThat(mvc.get().uri("/api/v1/transfers/{id}", original).with(asOperator()))
                 .bodyJson().extractingPath("$.status").isEqualTo("COMPLETED");
         assertThat(balanceOf(bob)).isEqualTo(40_000);
 
@@ -113,7 +113,7 @@ class ReversalApiIntegrationTest extends ApiTestSupport {
         String victim = fundedAccount("VND", 100_000);
         String fraudster = openAccount("VND");
         String original = jsonPath(transfer(victim, fraudster, 100_000, "VND"), "$.id");
-        mvc.post().uri("/api/v1/accounts/{id}/freeze", fraudster).exchange();
+        mvc.post().uri("/api/v1/accounts/{id}/freeze", fraudster).with(asOperator()).exchange();
 
         assertThat(reverse(original, "Fraud case #123")).hasStatus(HttpStatus.CREATED);
         assertThat(balanceOf(victim)).isEqualTo(100_000);
@@ -166,7 +166,7 @@ class ReversalApiIntegrationTest extends ApiTestSupport {
     private MvcTestResult reverse(String transferId, String reason) {
         return postWithKey("/api/v1/transfers/" + transferId + "/reversals", UUID.randomUUID().toString(), """
                 {"reason": "%s"}
-                """.formatted(reason));
+                """.formatted(reason), asOperator());
     }
 
     private List<Long> entryIds(String transferId) {

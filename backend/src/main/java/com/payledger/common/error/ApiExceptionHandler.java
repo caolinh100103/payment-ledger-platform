@@ -1,6 +1,7 @@
 package com.payledger.common.error;
 
 import com.payledger.common.idempotency.IdempotencyException;
+import com.payledger.security.AuthenticationFailedException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
@@ -30,6 +31,19 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
         problem.setProperty("code", ex.getCode());
         return problem;
+    }
+
+    @ExceptionHandler(AuthenticationFailedException.class)
+    ResponseEntity<ProblemDetail> handleAuthenticationFailed(AuthenticationFailedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+        problem.setProperty("code", ex.getCode());
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.UNAUTHORIZED);
+        if (ex.getRetryAfter() != null) {
+            // Whole seconds, rounded up so a client that waits exactly this long is not refused again.
+            long seconds = Math.max(1, ex.getRetryAfter().plusMillis(999).toSeconds());
+            response.header(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
+        }
+        return response.body(problem);
     }
 
     @ExceptionHandler(IdempotencyException.class)

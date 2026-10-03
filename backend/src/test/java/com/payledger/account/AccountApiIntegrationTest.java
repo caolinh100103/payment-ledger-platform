@@ -13,28 +13,58 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AccountApiIntegrationTest extends ApiTestSupport {
 
     @Test
-    void opensAccountAndReadsItBack() {
-        MvcTestResult created = openAccountRequest("alice", "VND");
+    void opensAnAccountForTheSignedInCustomerAndReadsItBack() {
+        String customer = newCustomer();
+        MvcTestResult created = openAccountRequest(customer, "VND");
 
         assertThat(created).hasStatus(HttpStatus.CREATED);
         assertThat(created).headers().containsHeader("Location");
+        assertThat(created).bodyJson().extractingPath("$.ownerId").isEqualTo(customer);
         assertThat(created).bodyJson().extractingPath("$.status").isEqualTo("ACTIVE");
         assertThat(created).bodyJson().extractingPath("$.type").isEqualTo("CUSTOMER");
         assertThat(created).bodyJson().extractingPath("$.balance").isEqualTo(0);
 
         String id = idOf(created);
-        assertThat(mvc.get().uri("/api/v1/accounts/{id}", id))
+        assertThat(mvc.get().uri("/api/v1/accounts/{id}", id).with(asCustomer(customer)))
                 .hasStatusOk()
-                .bodyJson().extractingPath("$.ownerId").isEqualTo("alice");
+                .bodyJson().extractingPath("$.ownerId").isEqualTo(customer);
     }
 
     @Test
-    void listsAccountsByOwner() {
-        String owner = "owner-" + UUID.randomUUID();
-        openAccountRequest(owner, "VND");
-        openAccountRequest(owner, "USD");
+    void theOwnerComesFromTheAccessTokenNotTheRequest() {
+        String customer = newCustomer();
 
-        assertThat(mvc.get().uri("/api/v1/accounts").param("ownerId", owner))
+        MvcTestResult created = mvc.post().uri("/api/v1/accounts")
+                .with(asCustomer(customer))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"ownerId": "%s", "currency": "VND"}
+                        """.formatted(newCustomer()))
+                .exchange();
+
+        assertThat(created).hasStatus(HttpStatus.CREATED);
+        assertThat(created).bodyJson().extractingPath("$.ownerId").isEqualTo(customer);
+    }
+
+    @Test
+    void listsTheCallersOwnAccounts() {
+        String customer = newCustomer();
+        openAccountRequest(customer, "VND");
+        openAccountRequest(customer, "USD");
+        openAccount("VND");
+
+        assertThat(mvc.get().uri("/api/v1/accounts").with(asCustomer(customer)))
+                .hasStatusOk()
+                .bodyJson().extractingPath("$.length()").isEqualTo(2);
+    }
+
+    @Test
+    void anOperatorListsAnyCustomersAccounts() {
+        String customer = newCustomer();
+        openAccountRequest(customer, "VND");
+        openAccountRequest(customer, "USD");
+
+        assertThat(mvc.get().uri("/api/v1/accounts").param("ownerId", customer).with(asOperator()))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.length()").isEqualTo(2);
     }
@@ -42,9 +72,10 @@ class AccountApiIntegrationTest extends ApiTestSupport {
     @Test
     void rejectsInvalidRequestWithProblemDetail() {
         assertThat(mvc.post().uri("/api/v1/accounts")
+                .with(asCustomer(newCustomer()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"ownerId": "", "currency": "vnd"}
+                        {"currency": "vnd"}
                         """))
                 .hasStatus(HttpStatus.BAD_REQUEST)
                 .hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
@@ -52,38 +83,40 @@ class AccountApiIntegrationTest extends ApiTestSupport {
 
     @Test
     void rejectsUnsupportedCurrency() {
-        assertThat(openAccountRequest("bob", "JPY"))
+        assertThat(openAccountRequest(newCustomer(), "JPY"))
                 .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("UNSUPPORTED_CURRENCY");
     }
 
     @Test
     void returnsNotFoundForUnknownAccount() {
-        assertThat(mvc.get().uri("/api/v1/accounts/{id}", UUID.randomUUID()))
+        assertThat(mvc.get().uri("/api/v1/accounts/{id}", UUID.randomUUID()).with(asOperator()))
                 .hasStatus(HttpStatus.NOT_FOUND)
                 .bodyJson().extractingPath("$.code").isEqualTo("RESOURCE_NOT_FOUND");
     }
 
     @Test
     void walksThroughStatusLifecycle() {
-        String id = idOf(openAccountRequest("carol", "EUR"));
+        String customer = newCustomer();
+        String id = idOf(openAccountRequest(customer, "EUR"));
 
-        assertThat(mvc.post().uri("/api/v1/accounts/{id}/freeze", id))
+        assertThat(mvc.post().uri("/api/v1/accounts/{id}/freeze", id).with(asOperator()))
                 .hasStatusOk().bodyJson().extractingPath("$.status").isEqualTo("FROZEN");
 
-        assertThat(mvc.post().uri("/api/v1/accounts/{id}/freeze", id))
+        assertThat(mvc.post().uri("/api/v1/accounts/{id}/freeze", id).with(asOperator()))
                 .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("INVALID_ACCOUNT_STATUS_TRANSITION");
 
-        assertThat(mvc.post().uri("/api/v1/accounts/{id}/unfreeze", id))
+        assertThat(mvc.post().uri("/api/v1/accounts/{id}/unfreeze", id).with(asOperator()))
                 .hasStatusOk().bodyJson().extractingPath("$.status").isEqualTo("ACTIVE");
 
-        assertThat(mvc.post().uri("/api/v1/accounts/{id}/close", id))
+        // The customer closes their own (empty) account.
+        assertThat(mvc.post().uri("/api/v1/accounts/{id}/close", id).with(asCustomer(customer)))
                 .hasStatusOk().bodyJson().extractingPath("$.status").isEqualTo("CLOSED");
     }
 
     @Test
-    void exposesPrometheusMetrics() {
+    void exposesPrometheusMetricsWithoutAuthentication() {
         assertThat(mvc.get().uri("/actuator/prometheus"))
                 .hasStatusOk()
                 .bodyText().contains("jvm_memory_used_bytes");
@@ -91,10 +124,11 @@ class AccountApiIntegrationTest extends ApiTestSupport {
 
     private MvcTestResult openAccountRequest(String ownerId, String currency) {
         return mvc.post().uri("/api/v1/accounts")
+                .with(asCustomer(ownerId))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"ownerId": "%s", "currency": "%s"}
-                        """.formatted(ownerId, currency))
+                        {"currency": "%s"}
+                        """.formatted(currency))
                 .exchange();
     }
 

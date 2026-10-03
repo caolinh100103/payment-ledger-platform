@@ -1,0 +1,16 @@
+# Test-only settings. Spring Boot reads classpath:config/application.yml after classpath:application.yml, so these
+# override the production values in src/main/resources/application.yml and leave the rest as it is.
+payledger:
+  rate-limit:
+    # Integration tests send thousands of requests from one address and a few users; RateLimitIntegrationTest
+    # checks the limits themselves with small buckets.
+    policies:
+      user:
+        capacity: 1000000
+        period: 1m
+      api-key:
+        capacity: 1000000
+        period: 1m
+      anonymous:
+        capacity: 1000000
+        period: 1m

@@ -53,6 +53,10 @@ public class Transfer {
     @Column(name = "reversal_of", updatable = false)
     private UUID reversalOf;
 
+    /** The {@link com.payledger.security.Actor#name()} of who asked for the movement. */
+    @Column(name = "initiated_by", nullable = false, updatable = false, length = 64)
+    private String initiatedBy;
+
     @Version
     private Long version;
 
@@ -67,23 +71,25 @@ public class Transfer {
     }
 
     static Transfer deposit(UUID systemAccountId, UUID destinationAccountId, long amount, String currency,
-                            String description) {
-        return create(TransferType.DEPOSIT, systemAccountId, destinationAccountId, amount, currency, description, null);
+                            String description, String initiatedBy) {
+        return create(TransferType.DEPOSIT, systemAccountId, destinationAccountId, amount, currency, description, null,
+                initiatedBy);
     }
 
     static Transfer transfer(UUID sourceAccountId, UUID destinationAccountId, long amount, String currency,
-                             String description) {
-        return create(TransferType.TRANSFER, sourceAccountId, destinationAccountId, amount, currency, description, null);
+                             String description, String initiatedBy) {
+        return create(TransferType.TRANSFER, sourceAccountId, destinationAccountId, amount, currency, description, null,
+                initiatedBy);
     }
 
     /** The compensating movement: same amount, opposite direction. */
-    static Transfer reversalOf(Transfer original, String reason) {
+    static Transfer reversalOf(Transfer original, String reason, String initiatedBy) {
         return create(TransferType.REVERSAL, original.destinationAccountId, original.sourceAccountId,
-                original.amount, original.currency, reason, original.id);
+                original.amount, original.currency, reason, original.id, initiatedBy);
     }
 
     private static Transfer create(TransferType type, UUID source, UUID destination, long amount, String currency,
-                                   String description, UUID reversalOf) {
+                                   String description, UUID reversalOf, String initiatedBy) {
         if (amount <= 0) {
             throw new IllegalArgumentException("Amount must be positive, got " + amount);
         }
@@ -100,6 +106,7 @@ public class Transfer {
         transfer.currency = currency;
         transfer.description = description;
         transfer.reversalOf = reversalOf;
+        transfer.initiatedBy = initiatedBy;
         transfer.createdAt = now();
         transfer.updatedAt = transfer.createdAt;
         return transfer;
@@ -180,6 +187,10 @@ public class Transfer {
 
     public UUID getReversalOf() {
         return reversalOf;
+    }
+
+    public String getInitiatedBy() {
+        return initiatedBy;
     }
 
     public Instant getCreatedAt() {

@@ -6,6 +6,8 @@ import com.payledger.account.AccountRepository;
 import com.payledger.common.error.BusinessRuleViolationException;
 import com.payledger.common.error.ResourceNotFoundException;
 import com.payledger.ledger.LedgerService;
+import com.payledger.security.Actor;
+import com.payledger.security.Role;
 import com.payledger.transfer.TransferRules.Rejection;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,20 +44,31 @@ public class TransferService {
      * top-up. The other leg debits the funding SYSTEM account of the currency.
      */
     @Transactional
-    public Transfer deposit(UUID accountId, long amount, String currency, String description) {
+    public Transfer deposit(Actor initiator, UUID accountId, long amount, String currency, String description) {
         UUID systemAccountId = accounts.findSystemAccountId(currency)
                 .orElseThrow(() -> new BusinessRuleViolationException("UNSUPPORTED_CURRENCY",
                         "Currency " + currency + " is not supported"));
         requireDistinct(systemAccountId, accountId);
-        return execute(Transfer.deposit(systemAccountId, accountId, amount, currency, description)).transfer();
+        return execute(Transfer.deposit(systemAccountId, accountId, amount, currency, description, initiator.name()))
+                .transfer();
     }
 
+    /**
+     * Moves money out of an account of the initiator, to any customer account (as with any bank transfer, the
+     * recipient only has to exist). Someone else's source account is reported as not found, before anything is
+     * locked or recorded: no FAILED transfer appears in the victim's history, and no account id can be probed.
+     * Ownership never changes ({@code owner_id} is not updatable), so checking it before the lock is safe.
+     */
     @Transactional
-    public Transfer transfer(UUID sourceAccountId, UUID destinationAccountId, long amount, String currency,
-                             String description) {
+    public Transfer transfer(Actor initiator, UUID sourceAccountId, UUID destinationAccountId, long amount,
+                             String currency, String description) {
         requireDistinct(sourceAccountId, destinationAccountId);
-        return execute(Transfer.transfer(sourceAccountId, destinationAccountId, amount, currency, description))
-                .transfer();
+        boolean ownsSource = accounts.findOwnerId(sourceAccountId).filter(owner -> isUser(initiator, owner)).isPresent();
+        if (!ownsSource) {
+            throw new ResourceNotFoundException("Account", sourceAccountId);
+        }
+        return execute(Transfer.transfer(sourceAccountId, destinationAccountId, amount, currency, description,
+                initiator.name())).transfer();
     }
 
     /**
@@ -70,7 +83,7 @@ public class TransferService {
      * INSUFFICIENT_FUNDS and the original stays COMPLETED, so it can be retried once funds are available.
      */
     @Transactional
-    public Transfer reverse(UUID originalId, String reason) {
+    public Transfer reverse(Actor initiator, UUID originalId, String reason) {
         Transfer original = transfers.findByIdForUpdate(originalId)
                 .orElseThrow(() -> new ResourceNotFoundException("Transfer", originalId));
         if (original.getType() == TransferType.REVERSAL) {
@@ -82,7 +95,7 @@ public class TransferService {
                     "Only COMPLETED transfers can be reversed; transfer " + originalId + " is " + original.getStatus());
         }
 
-        Executed reversal = execute(Transfer.reversalOf(original, reason));
+        Executed reversal = execute(Transfer.reversalOf(original, reason, initiator.name()));
         if (reversal.transfer().getStatus() == TransferStatus.COMPLETED) {
             original.markReversed();
             events.reversed(original, reversal.transfer(), reversal.accounts());
@@ -90,9 +103,24 @@ public class TransferService {
         return reversal.transfer();
     }
 
+    /** Operators see every transfer; a customer sees those touching one of their accounts, on either side. */
     @Transactional(readOnly = true)
-    public Transfer get(UUID id) {
-        return transfers.findById(id).orElseThrow(() -> new ResourceNotFoundException("Transfer", id));
+    public Transfer get(Actor actor, UUID id) {
+        Transfer transfer = transfers.findById(id).orElseThrow(() -> new ResourceNotFoundException("Transfer", id));
+        if (!actor.hasRole(Role.OPERATOR) && !isParty(actor, transfer)) {
+            throw new ResourceNotFoundException("Transfer", id);
+        }
+        return transfer;
+    }
+
+    private boolean isParty(Actor actor, Transfer transfer) {
+        return accounts.findOwnerId(transfer.getSourceAccountId()).filter(owner -> isUser(actor, owner)).isPresent()
+                || accounts.findOwnerId(transfer.getDestinationAccountId()).filter(owner -> isUser(actor, owner))
+                .isPresent();
+    }
+
+    private static boolean isUser(Actor actor, String ownerId) {
+        return actor.isUser() && actor.id().equals(ownerId);
     }
 
     private Executed execute(Transfer transfer) {

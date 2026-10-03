@@ -39,5 +39,12 @@ management:
       application: ${spring.application.name}
 
 payledger:
+  security:
+    jwt:
+      # The core service issues the access tokens and publishes its public keys here.
+      jwk-set-uri: ${PAYLEDGER_JWKS_URI:http://localhost:8080/.well-known/jwks.json}
+      issuer: ${PAYLEDGER_JWT_ISSUER:http://localhost:8080}
+      audience: payledger-api
   audit:
-    topic: payledger.transfers
+    # Money movements, account lifecycle, and security events (sign-ins, lockouts, sessions, users, API keys).
+    topics: payledger.transfers,payledger.accounts,payledger.security

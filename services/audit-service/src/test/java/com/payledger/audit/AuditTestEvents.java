@@ -11,11 +11,15 @@ final class AuditTestEvents {
     }
 
     static String cloudEvent(UUID id, String type, String subject) {
+        return cloudEvent(id, type, subject, "anonymous");
+    }
+
+    static String cloudEvent(UUID id, String type, String subject, String actor) {
         return """
                 {"specversion":"1.0","id":"%s","source":"/payledger/core","type":"%s","subject":"%s",\
-                "time":"%s","datacontenttype":"application/json","schemaversion":1,"actor":"anonymous",\
+                "time":"%s","datacontenttype":"application/json","schemaversion":1,"actor":"%s",\
                 "data":{"transferId":"%s","amount":250000,"currency":"VND"}}"""
-                .formatted(id, type, subject, Instant.now().truncatedTo(ChronoUnit.MICROS), subject);
+                .formatted(id, type, subject, Instant.now().truncatedTo(ChronoUnit.MICROS), actor, subject);
     }
 
     static AuditableEvent event(String subject) {

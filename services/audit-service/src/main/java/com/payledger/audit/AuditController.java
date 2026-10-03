@@ -1,6 +1,7 @@
 package com.payledger.audit;
 
 import com.fasterxml.jackson.annotation.JsonRawValue;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -10,9 +11,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-// Temporary: open to any caller until Phase 4 restricts it to the AUDITOR role.
+/** Read-only, and only for auditors (an ADMIN inherits the role). Nobody can write here; events arrive via Kafka. */
 @RestController
 @RequestMapping("/api/v1/audit-events")
+@PreAuthorize("hasRole('AUDITOR')")
 class AuditController {
 
     private static final int MAX_RESULTS = 200;

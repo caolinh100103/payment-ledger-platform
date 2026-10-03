@@ -113,8 +113,8 @@ class LedgerSchemaIntegrationTest extends ApiTestSupport {
         UUID id = UUID.randomUUID();
         jdbc.update("""
                 INSERT INTO transfers (id, type, status, source_account_id, destination_account_id, amount, currency,
-                                       created_at, updated_at)
-                VALUES (?, 'TRANSFER', 'COMPLETED', ?, ?, ?, 'VND', now(), now())
+                                       initiated_by, created_at, updated_at)
+                VALUES (?, 'TRANSFER', 'COMPLETED', ?, ?, ?, 'VND', 'user:test', now(), now())
                 """, id, from, to, amount);
         return id;
     }

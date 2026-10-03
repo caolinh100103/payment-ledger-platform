@@ -30,6 +30,9 @@ class NotificationFlowIntegrationTest {
     @Autowired
     MockMvcTester mvc;
 
+    @Autowired
+    TestJwtIssuer tokens;
+
     @Test
     void completedTransferNotifiesBothCustomers() throws Exception {
         UUID eventId = UUID.randomUUID();
@@ -39,7 +42,8 @@ class NotificationFlowIntegrationTest {
         await().atMost(Duration.ofSeconds(30)).until(() -> store.findByEvent(eventId).size() == 2);
         assertThat(store.findByEvent(eventId)).extracting(Notification::recipientId)
                 .containsExactlyInAnyOrder("alice", "bob");
-        assertThat(mvc.get().uri("/api/v1/notifications?recipientId=bob"))
+        // Bob, signed in, reads his own messages.
+        assertThat(mvc.get().uri("/api/v1/notifications").header("Authorization", tokens.bearer("bob", "CUSTOMER")))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$[0].message").asString().contains("+250,000 VND", "ND: Rent October");
     }

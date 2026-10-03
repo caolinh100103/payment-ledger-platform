@@ -3,6 +3,7 @@ package com.payledger.common.idempotency;
 import com.payledger.common.idempotency.IdempotencyStore.Claimed;
 import com.payledger.common.idempotency.IdempotencyStore.ClaimResult;
 import com.payledger.common.idempotency.IdempotencyStore.Existing;
+import com.payledger.security.CurrentActor;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -37,6 +38,9 @@ import java.util.regex.Pattern;
  *   <li>same key while the first request is still running → 409 {@code IDEMPOTENCY_KEY_IN_PROGRESS}</li>
  * </ul>
  *
+ * <p>Keys are scoped to the caller, as at Stripe: two clients that happen to pick the same key never see each
+ * other's responses.
+ *
  * <p>The response is stored in the <em>same</em> database transaction as the operation, so a crash can
  * never leave a committed transfer without its stored response (which would let a retry execute it twice).
  * Only outcomes that left a trace (a COMPLETED or FAILED transfer) are stored. An exception means nothing
@@ -48,21 +52,22 @@ public class IdempotencyHandler {
     public static final String HEADER = "Idempotency-Key";
     static final String REPLAYED_HEADER = "Idempotent-Replayed";
 
-    // Keys are only unique per client. Phase 4 replaces this with the authenticated principal.
-    private static final String SCOPE = "anonymous";
     private static final Pattern KEY_FORMAT = Pattern.compile("^[\\x21-\\x7E]{1,255}$");
 
     private final IdempotencyStore store;
+    private final CurrentActor currentActor;
     private final JsonMapper jsonMapper;
     private final TransactionTemplate operationTx;
     private final TransactionTemplate claimTx;
     private final Duration lease;
     private final Duration retention;
 
-    public IdempotencyHandler(IdempotencyStore store, JsonMapper jsonMapper, PlatformTransactionManager txManager,
+    public IdempotencyHandler(IdempotencyStore store, CurrentActor currentActor, JsonMapper jsonMapper,
+                              PlatformTransactionManager txManager,
                               @Value("${payledger.idempotency.lease:30s}") Duration lease,
                               @Value("${payledger.idempotency.retention:24h}") Duration retention) {
         this.store = store;
+        this.currentActor = currentActor;
         // Same output as Spring MVC: problem "properties" are flattened into the top-level JSON object.
         this.jsonMapper = jsonMapper.rebuild().addMixIn(ProblemDetail.class, ProblemDetailJacksonMixin.class).build();
         this.operationTx = new TransactionTemplate(txManager);
@@ -80,20 +85,22 @@ public class IdempotencyHandler {
     public ResponseEntity<String> execute(String key, HttpServletRequest request, Object requestBody,
                                           Supplier<ResponseEntity<?>> operation) {
         validate(key);
+        String scope = currentActor.get().name();
         String requestHash = fingerprint(request.getMethod(), request.getRequestURI(), requestBody);
 
-        ClaimResult claim = claimTx.execute(status -> store.claim(SCOPE, key, requestHash, lease, retention));
+        ClaimResult claim = claimTx.execute(status -> store.claim(scope, key, requestHash, lease, retention));
         return switch (claim) {
             case Existing existing -> replay(existing, requestHash);
-            case Claimed claimed -> executeClaimed(key, claimed, operation);
+            case Claimed claimed -> executeClaimed(scope, key, claimed, operation);
         };
     }
 
-    private ResponseEntity<String> executeClaimed(String key, Claimed claimed, Supplier<ResponseEntity<?>> operation) {
+    private ResponseEntity<String> executeClaimed(String scope, String key, Claimed claimed,
+                                                  Supplier<ResponseEntity<?>> operation) {
         try {
             StoredResponse response = operationTx.execute(status -> {
                 StoredResponse result = serialize(operation.get());
-                if (!store.complete(SCOPE, key, claimed.token(), result)) {
+                if (!store.complete(scope, key, claimed.token(), result)) {
                     // Our lease expired and another request took the key over: roll back our work.
                     throw inProgress();
                 }
@@ -102,7 +109,7 @@ public class IdempotencyHandler {
             return toHttp(response, false);
         } catch (RuntimeException ex) {
             try {
-                claimTx.executeWithoutResult(status -> store.release(SCOPE, key, claimed.token()));
+                claimTx.executeWithoutResult(status -> store.release(scope, key, claimed.token()));
             } catch (RuntimeException releaseFailure) {
                 // The lease expires on its own; the original error is what the client needs to see.
                 ex.addSuppressed(releaseFailure);

@@ -64,7 +64,7 @@ class TransferApiIntegrationTest extends ApiTestSupport {
                 .hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
         assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("INSUFFICIENT_FUNDS");
         String transferId = jsonPath(result, "$.transferId");
-        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId))
+        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId).with(asOwnerOf(alice)))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.failureCode").isEqualTo("INSUFFICIENT_FUNDS");
         assertThat(ledgerEntryCount(transferId)).isZero();
@@ -76,7 +76,7 @@ class TransferApiIntegrationTest extends ApiTestSupport {
     void frozenAccountCannotSendOrReceive() {
         String alice = fundedAccount("VND", 100_000);
         String bob = fundedAccount("VND", 100_000);
-        mvc.post().uri("/api/v1/accounts/{id}/freeze", bob).exchange();
+        mvc.post().uri("/api/v1/accounts/{id}/freeze", bob).with(asOperator()).exchange();
 
         assertThat(transfer(bob, alice, 1, "VND"))
                 .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
@@ -100,9 +100,10 @@ class TransferApiIntegrationTest extends ApiTestSupport {
     void customerCannotDrainOrFeedASystemAccount() {
         String alice = fundedAccount("VND", 100_000);
 
-        assertThat(transfer(systemAccountId("VND"), alice, 1_000_000, "VND"))
-                .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
-                .bodyJson().extractingPath("$.code").isEqualTo("ACCOUNT_TYPE_NOT_ALLOWED");
+        // Nobody owns a SYSTEM account, so it is not even found as a source.
+        assertThat(postWithKey("/api/v1/transfers", UUID.randomUUID().toString(),
+                transferBody(systemAccountId("VND"), alice, 1_000_000, "VND"), asOwnerOf(alice)))
+                .hasStatus(HttpStatus.NOT_FOUND);
         assertThat(transfer(alice, systemAccountId("VND"), 1_000, "VND"))
                 .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
                 .bodyJson().extractingPath("$.code").isEqualTo("ACCOUNT_TYPE_NOT_ALLOWED");
@@ -129,6 +130,7 @@ class TransferApiIntegrationTest extends ApiTestSupport {
     @Test
     void rejectsInvalidPayload() {
         assertThat(mvc.post().uri("/api/v1/transfers")
+                .with(asCustomer(newCustomer()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"sourceAccountId": null, "amount": 0, "currency": "vnd", "description": "%s"}

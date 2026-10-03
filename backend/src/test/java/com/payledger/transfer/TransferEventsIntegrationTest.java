@@ -1,6 +1,7 @@
 package com.payledger.transfer;
 
 import com.jayway.jsonpath.JsonPath;
+import com.payledger.security.Role;
 import com.payledger.support.ApiTestSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -21,9 +22,11 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
 
     @Test
     void completedTransferEmitsCreatedThenCompletedWithBalancesAfter() {
-        String alice = openAccount("alice", "VND");
+        String aliceOwner = newCustomer();
+        String bobOwner = newCustomer();
+        String alice = openAccount(aliceOwner, "VND");
         deposit(alice, 1_000_000, "VND");
-        String bob = openAccount("bob", "VND");
+        String bob = openAccount(bobOwner, "VND");
 
         String transferId = jsonPath(transfer(alice, bob, 250_000, "VND"), "$.id");
 
@@ -37,7 +40,8 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         assertThat(created.<String>read("$.source")).isEqualTo("/payledger/core");
         assertThat(created.<String>read("$.subject")).isEqualTo(transferId);
         assertThat(created.<Integer>read("$.schemaversion")).isEqualTo(1);
-        assertThat(created.<String>read("$.actor")).isEqualTo("anonymous");
+        // Who asked for it: the customer who signed in, as the audit trail will record.
+        assertThat(created.<String>read("$.actor")).isEqualTo("user:" + aliceOwner);
         assertThat(created.<String>read("$.data.status")).isEqualTo("PENDING");
         assertThat(created.<Object>read("$.data.sourceAccount.balanceAfter")).isNull();
 
@@ -49,10 +53,10 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         assertThat(completed.<String>read("$.data.currency")).isEqualTo("VND");
         assertThat(completed.<String>read("$.data.description")).isEqualTo("Tiền nhà tháng 10");
         assertThat(completed.<String>read("$.data.sourceAccount.accountId")).isEqualTo(alice);
-        assertThat(completed.<String>read("$.data.sourceAccount.ownerId")).isEqualTo("alice");
+        assertThat(completed.<String>read("$.data.sourceAccount.ownerId")).isEqualTo(aliceOwner);
         assertThat(completed.<String>read("$.data.sourceAccount.accountType")).isEqualTo("CUSTOMER");
         assertThat(completed.<Integer>read("$.data.sourceAccount.balanceAfter")).isEqualTo(750_000);
-        assertThat(completed.<String>read("$.data.destinationAccount.ownerId")).isEqualTo("bob");
+        assertThat(completed.<String>read("$.data.destinationAccount.ownerId")).isEqualTo(bobOwner);
         assertThat(completed.<Integer>read("$.data.destinationAccount.balanceAfter")).isEqualTo(250_000);
         assertThat(completed.id()).isNotEqualTo(created.id());
     }
@@ -67,6 +71,7 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         assertThat(completed.type()).isEqualTo(COMPLETED);
         assertThat(completed.<String>read("$.data.type")).isEqualTo("DEPOSIT");
         assertThat(completed.<String>read("$.data.sourceAccount.accountType")).isEqualTo("SYSTEM");
+        assertThat(completed.<String>read("$.actor")).startsWith("apikey:");
         assertThat(completed.<Integer>read("$.data.destinationAccount.balanceAfter")).isEqualTo(500_000);
     }
 
@@ -91,13 +96,15 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         String alice = fundedAccount("VND", 1_000_000);
         String bob = openAccount("VND");
         String originalId = jsonPath(transfer(alice, bob, 300_000, "VND"), "$.id");
+        String operator = newCustomer();
 
-        String reversalId = jsonPath(reverse(originalId), "$.id");
+        String reversalId = jsonPath(reverse(originalId, operator), "$.id");
 
         List<Event> reversalEvents = eventsOf(reversalId);
         assertThat(reversalEvents).extracting(Event::type).containsExactly(CREATED, COMPLETED);
         Event reversalCompleted = reversalEvents.get(1);
         assertThat(reversalCompleted.<String>read("$.data.type")).isEqualTo("REVERSAL");
+        assertThat(reversalCompleted.<String>read("$.actor")).isEqualTo("user:" + operator);
         assertThat(reversalCompleted.<String>read("$.data.reversalOf")).isEqualTo(originalId);
         assertThat(reversalCompleted.<String>read("$.data.sourceAccount.accountId")).isEqualTo(bob);
         assertThat(reversalCompleted.<Integer>read("$.data.sourceAccount.balanceAfter")).isZero();
@@ -107,6 +114,8 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         assertThat(originalEvents).extracting(Event::type).containsExactly(CREATED, COMPLETED, REVERSED);
         Event reversed = originalEvents.get(2);
         assertThat(reversed.<String>read("$.subject")).isEqualTo(originalId);
+        // The original was paid by Alice, but the reversal was the operator's decision.
+        assertThat(reversed.<String>read("$.actor")).isEqualTo("user:" + operator);
         assertThat(reversed.<String>read("$.data.status")).isEqualTo("REVERSED");
         assertThat(reversed.<String>read("$.data.reversedBy")).isEqualTo(reversalId);
         assertThat(reversed.<String>read("$.data.sourceAccount.accountId")).isEqualTo(alice);
@@ -121,7 +130,7 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         String originalId = jsonPath(transfer(alice, bob, 500_000, "VND"), "$.id");
         transfer(bob, carol, 500_000, "VND");
 
-        MvcTestResult result = reverse(originalId);
+        MvcTestResult result = reverse(originalId, newCustomer());
 
         assertThat(result).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(eventsOf(jsonPath(result, "$.transferId"))).extracting(Event::type).containsExactly(CREATED, FAILED);
@@ -146,16 +155,16 @@ class TransferEventsIntegrationTest extends ApiTestSupport {
         String key = UUID.randomUUID().toString();
         String body = transferBody(alice, bob, 10_000, "VND");
 
-        String transferId = jsonPath(postWithKey("/api/v1/transfers", key, body), "$.id");
-        postWithKey("/api/v1/transfers", key, body);
+        String transferId = jsonPath(postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice)), "$.id");
+        postWithKey("/api/v1/transfers", key, body, asOwnerOf(alice));
 
         assertThat(eventsOf(transferId)).hasSize(2);
     }
 
-    private MvcTestResult reverse(String transferId) {
+    private MvcTestResult reverse(String transferId, String operator) {
         return postWithKey("/api/v1/transfers/" + transferId + "/reversals", UUID.randomUUID().toString(), """
                 {"reason": "Customer dispute"}
-                """);
+                """, asUser(operator, Role.OPERATOR));
     }
 
     private List<Event> eventsOf(String aggregateId) {

@@ -1,6 +1,7 @@
 package com.payledger.transfer;
 
 import com.payledger.common.idempotency.IdempotencyHandler;
+import com.payledger.security.Actor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -10,6 +11,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,20 +38,22 @@ public class TransferController {
      * 201 with the COMPLETED transfer, or 422 with a stable {@code code} (e.g. INSUFFICIENT_FUNDS) when a
      * business rule rejects it; the rejected attempt is still recorded and returned as {@code transferId}.
      * Requires an {@code Idempotency-Key}: retrying with the same key returns the original outcome.
+     * The source account must belong to the caller.
      */
-    // Temporary: the caller may debit any account until JWT auth (Phase 4) checks ownership of the source.
     @PostMapping
+    @PreAuthorize("hasRole('CUSTOMER')")
     public ResponseEntity<String> create(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
                                          @Valid @RequestBody CreateTransferRequest request,
-                                         HttpServletRequest http) {
+                                         HttpServletRequest http, Actor actor) {
         return idempotency.execute(key, http, request, () -> TransferOutcomes.toResponse(
-                transferService.transfer(request.sourceAccountId(), request.destinationAccountId(),
+                transferService.transfer(actor, request.sourceAccountId(), request.destinationAccountId(),
                         request.amount(), request.currency(), request.description())));
     }
 
     @GetMapping("/{id}")
-    public TransferResponse get(@PathVariable UUID id) {
-        return TransferResponse.from(transferService.get(id));
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'OPERATOR')")
+    public TransferResponse get(@PathVariable UUID id, Actor actor) {
+        return TransferResponse.from(transferService.get(actor, id));
     }
 
     /**
@@ -57,14 +61,14 @@ public class TransferController {
      * TRANSFER_NOT_REVERSIBLE if it is not COMPLETED; 422 with a FAILED reversal (e.g. INSUFFICIENT_FUNDS)
      * if the money can no longer be taken back.
      */
-    // Temporary: open to any caller until Phase 4 restricts it to the OPERATOR role.
     @PostMapping("/{id}/reversals")
+    @PreAuthorize("hasRole('OPERATOR')")
     public ResponseEntity<String> reverse(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
                                           @PathVariable UUID id,
                                           @Valid @RequestBody ReverseTransferRequest request,
-                                          HttpServletRequest http) {
+                                          HttpServletRequest http, Actor actor) {
         return idempotency.execute(key, http, request,
-                () -> TransferOutcomes.toResponse(transferService.reverse(id, request.reason())));
+                () -> TransferOutcomes.toResponse(transferService.reverse(actor, id, request.reason())));
     }
 
     /** {@code reason} is kept as the reversal's description for the audit trail. */

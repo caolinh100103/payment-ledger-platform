@@ -89,3 +89,12 @@ credentials for it, so a compromised core cannot rewrite history.
 - The log contains personal data (owner ids, descriptions). Immutability conflicts with erasure rights (GDPR,
   Vietnam's Decree 13/2023/ND-CP). The usual answer is crypto-shredding: encrypt personal fields with a
   per-subject key and delete the key. This is not implemented yet.
+
+## Update (Phase 4): who, not only what
+
+Since Phase 4 every event names a real `actor` (`user:<id>`, `apikey:<id>`, `anonymous` or `system`) instead of
+`anonymous`, and the audit service also consumes `payledger.accounts` and `payledger.security`
+([events](../events.md)). Account freezes, sign-ins and failed sign-ins (with the client IP), lockouts, unlocks,
+revoked sessions, and user and API key administration go into the same hash chain as the money movements: the
+events PCI DSS requirement 10.2.1 asks an audit log to capture. Reading the trail requires the `AUDITOR` role
+([ADR 0011](0011-authorization-and-api-keys.md)).

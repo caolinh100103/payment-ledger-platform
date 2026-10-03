@@ -46,7 +46,7 @@ class DepositApiIntegrationTest extends ApiTestSupport {
         String account = openAccount("USD");
         String transferId = jsonPath(deposit(account, 1_999, "USD"), "$.id");
 
-        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId))
+        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId).with(asOperator()))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.amount").isEqualTo(1_999);
     }
@@ -54,7 +54,7 @@ class DepositApiIntegrationTest extends ApiTestSupport {
     @Test
     void rejectedDepositIsRecordedAsFailedWithoutTouchingBalances() {
         String account = openAccount("VND");
-        mvc.post().uri("/api/v1/accounts/{id}/freeze", account).exchange();
+        mvc.post().uri("/api/v1/accounts/{id}/freeze", account).with(asOperator()).exchange();
 
         MvcTestResult result = deposit(account, 10_000, "VND");
 
@@ -63,7 +63,7 @@ class DepositApiIntegrationTest extends ApiTestSupport {
         assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("DESTINATION_ACCOUNT_NOT_ACTIVE");
 
         String transferId = jsonPath(result, "$.transferId");
-        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId))
+        assertThat(mvc.get().uri("/api/v1/transfers/{id}", transferId).with(asOperator()))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.status").isEqualTo("FAILED");
         assertThat(ledgerEntryCount(transferId)).isZero();

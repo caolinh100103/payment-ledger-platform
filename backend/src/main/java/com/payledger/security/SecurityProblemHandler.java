@@ -1,0 +1,57 @@
+package com.payledger.security;
+
+import com.payledger.security.apikey.ApiKeyAuthenticationFilter.InvalidApiKeyException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+/**
+ * Renders 401 and 403 responses from the security filters as RFC 9457 problem details with a stable {@code code},
+ * like every other error of the API. The RFC 6750 {@code WWW-Authenticate} header is kept, so OAuth-aware clients
+ * still see {@code error="invalid_token"}.
+ */
+@Component
+class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
+
+    private final BearerTokenAuthenticationEntryPoint bearerEntryPoint = new BearerTokenAuthenticationEntryPoint();
+    private final BearerTokenAccessDeniedHandler bearerAccessDenied = new BearerTokenAccessDeniedHandler();
+    private final ProblemWriter problems;
+
+    SecurityProblemHandler(ProblemWriter problems) {
+        this.problems = problems;
+    }
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException ex)
+            throws IOException {
+        bearerEntryPoint.commence(request, response, ex);
+        if (ex instanceof InvalidBearerTokenException) {
+            problems.write(response, HttpStatus.UNAUTHORIZED, "INVALID_TOKEN",
+                    "The access token is invalid or has expired");
+        } else if (ex instanceof InvalidApiKeyException) {
+            problems.write(response, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY",
+                    "The API key is invalid, expired or revoked");
+        } else {
+            problems.write(response, HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
+                    "This operation requires an access token");
+        }
+    }
+
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException ex)
+            throws IOException {
+        bearerAccessDenied.handle(request, response, ex);
+        problems.write(response, HttpStatus.FORBIDDEN, "ACCESS_DENIED",
+                "You are not allowed to perform this operation");
+    }
+}

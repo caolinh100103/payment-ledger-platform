@@ -28,6 +28,18 @@ spring:
       # One consumer thread per partition of payledger.transfers.
       concurrency: 3
 
+logging:
+  structured:
+    format:
+      # JSON lines in Elastic Common Schema (ECS), for a log pipeline (Filebeat, Fluent Bit, Grafana Alloy). Each line
+      # carries the trace and span ids. For plain text in a terminal, start the service with LOG_FORMAT= (empty).
+      console: ${LOG_FORMAT:ecs}
+    json:
+      rename:
+        # ECS field names for the trace context, so Kibana and Elastic APM link each line to its trace.
+        "[traceId]": trace.id
+        "[spanId]": span.id
+
 server:
   port: ${SERVER_PORT:8082}
 

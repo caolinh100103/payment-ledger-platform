@@ -40,8 +40,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AuthApiIntegrationTest extends ApiTestSupport {
 
-    private static final String PASSWORD = "correct horse battery staple";
-
     @Autowired
     JwtEncoder jwtEncoder;
 
@@ -58,6 +56,8 @@ class AuthApiIntegrationTest extends ApiTestSupport {
         assertThat(login).hasStatusOk();
         assertThat(login).bodyJson().extractingPath("$.tokenType").isEqualTo("Bearer");
         assertThat(login).bodyJson().extractingPath("$.expiresIn").isEqualTo(300);
+        assertThat(login).bodyJson().extractingPath("$.refreshToken").isNotNull();
+        assertThat(login).bodyJson().extractingPath("$.refreshExpiresIn").isEqualTo(900);
         SignedJWT token = SignedJWT.parse(jsonPath(login, "$.accessToken"));
         assertThat(token.getHeader().getAlgorithm()).isEqualTo(JWSAlgorithm.ES256);
         assertThat(token.getHeader().getType()).isEqualTo(new JOSEObjectType("at+jwt"));
@@ -70,6 +70,7 @@ class AuthApiIntegrationTest extends ApiTestSupport {
         assertThat(claims.getStringListClaim("roles")).containsExactly("CUSTOMER");
         assertThat(claims.getStringClaim("client_id")).isEqualTo("payledger-app");
         assertThat(claims.getJWTID()).isNotBlank();
+        assertThat(claims.getStringClaim("sid")).isNotBlank();
         assertThat(claims.getExpirationTime().getTime() - claims.getIssueTime().getTime()).isEqualTo(300_000);
 
         assertThat(mvc.get().uri("/api/v1/users/me").header("Authorization", "Bearer " + token.serialize()))
@@ -349,27 +350,5 @@ class AuthApiIntegrationTest extends ApiTestSupport {
     private static String unsigned(String token) {
         String header = Base64.getUrlEncoder().withoutPadding().encodeToString("{\"alg\":\"none\",\"typ\":\"at+jwt\"}".getBytes());
         return header + "." + token.split("\\.")[1] + ".";
-    }
-
-    private MvcTestResult signUp(String username, String password) {
-        return mvc.post().uri("/api/v1/auth/signup")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"username": "%s", "password": "%s"}
-                        """.formatted(username, password))
-                .exchange();
-    }
-
-    private MvcTestResult login(String username, String password) {
-        return mvc.post().uri("/api/v1/auth/login")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"username": "%s", "password": "%s"}
-                        """.formatted(username, password))
-                .exchange();
-    }
-
-    private static String uniqueUsername() {
-        return "user-" + UUID.randomUUID().toString().substring(0, 8);
     }
 }

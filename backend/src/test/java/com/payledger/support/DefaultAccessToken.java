@@ -22,7 +22,8 @@ public class DefaultAccessToken {
         UUID user = UUID.randomUUID();
         return builder -> builder.defaultRequest(get("/").with(request -> {
             if (request.getHeader(HttpHeaders.AUTHORIZATION) == null) {
-                request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer " + accessTokens.issue(user, Role.OPERATOR).value());
+                String token = accessTokens.issue(user, Role.OPERATOR, UUID.randomUUID()).value();
+                request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token);
             }
             return request;
         }));

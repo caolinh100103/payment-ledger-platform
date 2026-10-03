@@ -69,6 +69,13 @@ payledger:
       access-token-ttl: 5m
       # Private EC P-256 JWK (JSON with a kid), from a secret store. Empty: a random key per start (dev only).
       signing-key: ${PAYLEDGER_JWT_SIGNING_KEY:}
+    refresh:
+      # Idle timeout, within OWASP's 15-30 minutes for a high-value application: each refresh token lasts this
+      # long, and using it issues the next one.
+      token-ttl: 15m
+      # Absolute lifetime of a sign-in session (a working day), however active the user is.
+      session-ttl: 8h
+      cleanup-interval: PT1H
     login:
       # As VCB Digibank: the 5th wrong password in a row locks the user out.
       max-failed-attempts: 5

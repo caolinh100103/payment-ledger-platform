@@ -10,12 +10,19 @@ import java.time.Duration;
  * @param bootstrapAdmin the first ADMIN, created at startup when no ADMIN exists and a password is set
  */
 @ConfigurationProperties("payledger.security")
-public record SecurityProperties(Jwt jwt, Login login, BootstrapAdmin bootstrapAdmin) {
+public record SecurityProperties(Jwt jwt, Refresh refresh, Login login, BootstrapAdmin bootstrapAdmin) {
 
     /**
      * @param signingKey the private EC P-256 key as a JWK (JSON); blank means a random key per start
      */
     public record Jwt(String issuer, String audience, String clientId, Duration accessTokenTtl, String signingKey) {
+    }
+
+    /**
+     * @param tokenTtl   idle timeout: how long one refresh token stays valid
+     * @param sessionTtl absolute lifetime of a sign-in session
+     */
+    public record Refresh(Duration tokenTtl, Duration sessionTtl) {
     }
 
     public record Login(int maxFailedAttempts, Duration lockoutDuration) {

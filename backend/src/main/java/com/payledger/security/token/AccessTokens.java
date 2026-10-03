@@ -37,7 +37,8 @@ public class AccessTokens {
         this.properties = properties.jwt();
     }
 
-    public IssuedToken issue(UUID userId, Role role) {
+    /** @param sessionId the sign-in session ({@code sid} claim), which ties the token to its refresh tokens */
+    public IssuedToken issue(UUID userId, Role role, UUID sessionId) {
         // JWT timestamps are whole seconds.
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         Instant expiresAt = now.plus(properties.accessTokenTtl());
@@ -51,6 +52,7 @@ public class AccessTokens {
                 .id(UUID.randomUUID().toString())
                 .claim("client_id", properties.clientId())
                 .claim(ROLES_CLAIM, List.of(role.name()))
+                .claim("sid", sessionId.toString())
                 .build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
         return new IssuedToken(token, Duration.between(now, expiresAt));

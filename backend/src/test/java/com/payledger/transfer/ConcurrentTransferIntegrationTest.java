@@ -59,7 +59,7 @@ class ConcurrentTransferIntegrationTest {
     @BeforeEach
     void setUp() {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-        accessToken = accessTokens.issue(UUID.randomUUID(), Role.OPERATOR).value();
+        accessToken = accessTokens.issue(UUID.randomUUID(), Role.OPERATOR, UUID.randomUUID()).value();
         deadlocksBefore = deadlockCount();
     }
 

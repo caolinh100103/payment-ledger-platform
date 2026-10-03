@@ -20,6 +20,8 @@ import java.util.UUID;
 @Import({TestcontainersConfiguration.class, DefaultAccessToken.class})
 public abstract class ApiTestSupport {
 
+    protected static final String PASSWORD = "correct horse battery staple";
+
     @Autowired
     protected MockMvcTester mvc;
 
@@ -63,6 +65,28 @@ public abstract class ApiTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json)
                 .exchange();
+    }
+
+    protected MvcTestResult signUp(String username, String password) {
+        return mvc.post().uri("/api/v1/auth/signup")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"username": "%s", "password": "%s"}
+                        """.formatted(username, password))
+                .exchange();
+    }
+
+    protected MvcTestResult login(String username, String password) {
+        return mvc.post().uri("/api/v1/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"username": "%s", "password": "%s"}
+                        """.formatted(username, password))
+                .exchange();
+    }
+
+    protected static String uniqueUsername() {
+        return "user-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     protected static String bodyOf(MvcTestResult result) {

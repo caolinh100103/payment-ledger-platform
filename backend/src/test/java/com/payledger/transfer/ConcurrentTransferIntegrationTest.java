@@ -2,7 +2,10 @@ package com.payledger.transfer;
 
 import com.jayway.jsonpath.JsonPath;
 import com.payledger.TestcontainersConfiguration;
+import com.payledger.security.Actor;
 import com.payledger.security.Role;
+import com.payledger.security.apikey.ApiKeyScope;
+import com.payledger.security.apikey.ApiKeys;
 import com.payledger.security.token.AccessTokens;
 import com.payledger.support.LedgerInvariants;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -36,6 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Many clients hitting the real HTTP server at once: real Tomcat threads, a real connection pool and real
  * PostgreSQL row locks. Proves no overdraft, no lost update, no deadlock and a balanced ledger.
+ *
+ * <p>All accounts of a test belong to one customer, whose access token every transfer carries; deposits come from
+ * the bank integration's API key.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
@@ -52,14 +59,20 @@ class ConcurrentTransferIntegrationTest {
     @Autowired
     AccessTokens accessTokens;
 
+    @Autowired
+    ApiKeys apiKeys;
+
     private HttpClient http;
-    private String accessToken;
+    private String customerToken;
+    private String bankKey;
     private long deadlocksBefore;
 
     @BeforeEach
     void setUp() {
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-        accessToken = accessTokens.issue(UUID.randomUUID(), Role.OPERATOR, UUID.randomUUID()).value();
+        customerToken = accessTokens.issue(UUID.randomUUID(), Role.CUSTOMER, UUID.randomUUID()).value();
+        bankKey = apiKeys.create("Partner bank (load test)", Set.of(ApiKeyScope.DEPOSITS_WRITE), null, Actor.SYSTEM)
+                .key();
         deadlocksBefore = deadlockCount();
     }
 
@@ -173,12 +186,12 @@ class ConcurrentTransferIntegrationTest {
 
     private String fundedAccount(long amount) throws Exception {
         HttpResponse<String> opened = post("/api/v1/accounts", null, """
-                {"ownerId": "load-%s", "currency": "VND"}
-                """.formatted(UUID.randomUUID()));
+                {"currency": "VND"}
+                """, "Authorization", "Bearer " + customerToken);
         String id = JsonPath.read(opened.body(), "$.id");
         HttpResponse<String> deposit = post("/api/v1/deposits", UUID.randomUUID().toString(), """
                 {"accountId": "%s", "amount": %d, "currency": "VND"}
-                """.formatted(id, amount));
+                """.formatted(id, amount), "X-API-Key", bankKey);
         assertThat(deposit.statusCode()).isEqualTo(201);
         return id;
     }
@@ -186,14 +199,15 @@ class ConcurrentTransferIntegrationTest {
     private HttpResponse<String> transfer(String from, String to, long amount) throws Exception {
         return post("/api/v1/transfers", UUID.randomUUID().toString(), """
                 {"sourceAccountId": "%s", "destinationAccountId": "%s", "amount": %d, "currency": "VND"}
-                """.formatted(from, to, amount));
+                """.formatted(from, to, amount), "Authorization", "Bearer " + customerToken);
     }
 
-    private HttpResponse<String> post(String path, String idempotencyKey, String json) throws Exception {
+    private HttpResponse<String> post(String path, String idempotencyKey, String json, String credentialHeader,
+                                      String credential) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + accessToken)
+                .header(credentialHeader, credential)
                 .POST(HttpRequest.BodyPublishers.ofString(json));
         if (idempotencyKey != null) {
             request.header("Idempotency-Key", idempotencyKey);

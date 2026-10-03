@@ -1,6 +1,7 @@
 package com.payledger.transfer;
 
 import com.payledger.common.idempotency.IdempotencyHandler;
+import com.payledger.security.Actor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -22,6 +24,9 @@ import java.util.UUID;
  * called by the bank / payment-gateway integration (e.g. on a top-up webhook), not by end users. Webhooks
  * are delivered at least once, so the integration sends the bank's transaction reference as the
  * {@code Idempotency-Key} and a redelivered notification never credits the customer twice.
+ *
+ * <p>Only a machine client holding an API key with the {@code deposits:write} scope may call it. No person can,
+ * not even an ADMIN: a deposit creates customer money, and only the bank knows that money really arrived.
  */
 @RestController
 @RequestMapping("/api/v1/deposits")
@@ -36,11 +41,12 @@ public class DepositController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('SCOPE_deposits:write')")
     public ResponseEntity<String> deposit(@RequestHeader(name = IdempotencyHandler.HEADER, required = false) String key,
                                           @Valid @RequestBody DepositRequest request,
-                                          HttpServletRequest http) {
+                                          HttpServletRequest http, Actor actor) {
         return idempotency.execute(key, http, request, () -> TransferOutcomes.toResponse(
-                transferService.deposit(request.accountId(), request.amount(), request.currency(),
+                transferService.deposit(actor, request.accountId(), request.amount(), request.currency(),
                         request.description())));
     }
 

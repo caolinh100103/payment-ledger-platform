@@ -169,9 +169,9 @@ class AuthApiIntegrationTest extends ApiTestSupport {
             login(username, "wrong password");
         }
 
-        assertThat(mvc.get().uri("/api/v1/users/{id}", userId))
+        assertThat(mvc.get().uri("/api/v1/users/{id}", userId).with(asOperator()))
                 .bodyJson().extractingPath("$.lockedUntil").isNotNull();
-        assertThat(mvc.post().uri("/api/v1/users/{id}/unlock", userId))
+        assertThat(mvc.post().uri("/api/v1/users/{id}/unlock", userId).with(asOperator()))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.lockedUntil").isNull();
         assertThat(login(username, PASSWORD)).hasStatusOk();
@@ -212,9 +212,7 @@ class AuthApiIntegrationTest extends ApiTestSupport {
 
     @Test
     void requestWithoutTokenIsRejectedWithAProblem() {
-        MvcTestResult result = mvc.get().uri("/api/v1/accounts/{id}", UUID.randomUUID())
-                .header("Authorization", "")
-                .exchange();
+        MvcTestResult result = mvc.get().uri("/api/v1/accounts/{id}", UUID.randomUUID()).exchange();
 
         assertThat(result).hasStatus(HttpStatus.UNAUTHORIZED).hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
         assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("AUTHENTICATION_REQUIRED");
@@ -224,8 +222,7 @@ class AuthApiIntegrationTest extends ApiTestSupport {
 
     @Test
     void describesItselfAsAnOAuthProtectedResource() {
-        MvcTestResult metadata = mvc.get().uri("/.well-known/oauth-protected-resource").header("Authorization", "")
-                .exchange();
+        MvcTestResult metadata = mvc.get().uri("/.well-known/oauth-protected-resource").exchange();
 
         assertThat(metadata).hasStatusOk();
         assertThat(metadata).bodyJson().extractingPath("$.authorization_servers").asArray()
@@ -258,7 +255,7 @@ class AuthApiIntegrationTest extends ApiTestSupport {
 
     @Test
     void publishesOnlyThePublicKey() {
-        MvcTestResult jwks = mvc.get().uri("/.well-known/jwks.json").header("Authorization", "").exchange();
+        MvcTestResult jwks = mvc.get().uri("/.well-known/jwks.json").exchange();
 
         assertThat(jwks).hasStatusOk();
         assertThat(jwks).bodyJson().extractingPath("$.keys.length()").isEqualTo(1);

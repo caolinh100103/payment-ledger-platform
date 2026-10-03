@@ -38,7 +38,6 @@ class ApiKeyApiIntegrationTest extends ApiTestSupport {
         String account = openAccount("VND");
 
         MvcTestResult deposit = mvc.post().uri("/api/v1/deposits")
-                .header("Authorization", "")
                 .header("X-API-Key", key)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -133,6 +132,6 @@ class ApiKeyApiIntegrationTest extends ApiTestSupport {
     }
 
     private MvcTestResult withKey(String key, String uri) {
-        return mvc.get().uri(uri).header("Authorization", "").header("X-API-Key", key).exchange();
+        return mvc.get().uri(uri).header("X-API-Key", key).exchange();
     }
 }

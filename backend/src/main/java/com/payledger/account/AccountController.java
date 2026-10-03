@@ -1,10 +1,11 @@
 package com.payledger.account;
 
+import com.payledger.security.Actor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,7 +22,7 @@ import java.util.UUID;
 
 /**
  * Account API. Status changes are explicit actions (freeze/unfreeze/close) rather than a generic
- * PATCH so each one can later get its own RBAC rule and audit event.
+ * PATCH, so each one has its own access rule.
  */
 @RestController
 @RequestMapping("/api/v1/accounts")
@@ -33,42 +34,48 @@ public class AccountController {
         this.accountService = accountService;
     }
 
+    /** Opens an account for the signed-in customer; the owner comes from the access token, never the request. */
     @PostMapping
-    public ResponseEntity<AccountResponse> open(@Valid @RequestBody OpenAccountRequest request) {
-        Account account = accountService.open(request.ownerId(), request.currency());
+    @PreAuthorize("hasRole('CUSTOMER')")
+    public ResponseEntity<AccountResponse> open(@Valid @RequestBody OpenAccountRequest request, Actor actor) {
+        Account account = accountService.open(actor.id(), request.currency());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(account.getId()).toUri();
         return ResponseEntity.created(location).body(AccountResponse.from(account));
     }
 
     @GetMapping("/{id}")
-    public AccountResponse get(@PathVariable UUID id) {
-        return AccountResponse.from(accountService.get(id));
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'OPERATOR')")
+    public AccountResponse get(@PathVariable UUID id, Actor actor) {
+        return AccountResponse.from(accountService.get(actor, id));
     }
 
-    // Temporary: ownerId comes from the query until JWT auth (Phase 4) supplies the caller's identity.
+    /** The caller's own accounts; an operator passes {@code ownerId} to look up a customer's. */
     @GetMapping
-    public List<AccountResponse> listByOwner(@RequestParam String ownerId) {
-        return accountService.listByOwner(ownerId).stream().map(AccountResponse::from).toList();
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'OPERATOR')")
+    public List<AccountResponse> list(@RequestParam(required = false) String ownerId, Actor actor) {
+        return accountService.list(actor, ownerId).stream().map(AccountResponse::from).toList();
     }
 
     @PostMapping("/{id}/freeze")
-    public AccountResponse freeze(@PathVariable UUID id) {
-        return AccountResponse.from(accountService.freeze(id));
+    @PreAuthorize("hasRole('OPERATOR')")
+    public AccountResponse freeze(@PathVariable UUID id, Actor actor) {
+        return AccountResponse.from(accountService.freeze(actor, id));
     }
 
     @PostMapping("/{id}/unfreeze")
-    public AccountResponse unfreeze(@PathVariable UUID id) {
-        return AccountResponse.from(accountService.unfreeze(id));
+    @PreAuthorize("hasRole('OPERATOR')")
+    public AccountResponse unfreeze(@PathVariable UUID id, Actor actor) {
+        return AccountResponse.from(accountService.unfreeze(actor, id));
     }
 
     @PostMapping("/{id}/close")
-    public AccountResponse close(@PathVariable UUID id) {
-        return AccountResponse.from(accountService.close(id));
+    @PreAuthorize("hasAnyRole('CUSTOMER', 'OPERATOR')")
+    public AccountResponse close(@PathVariable UUID id, Actor actor) {
+        return AccountResponse.from(accountService.close(actor, id));
     }
 
     public record OpenAccountRequest(
-            @NotBlank @Size(max = 64) String ownerId,
             @NotBlank @Pattern(regexp = "^[A-Z]{3}$", message = "must be an ISO 4217 code, e.g. VND") String currency) {
     }
 

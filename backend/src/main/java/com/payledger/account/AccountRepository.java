@@ -21,4 +21,11 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
 
     @Query("select a.id from Account a where a.type = com.payledger.account.AccountType.SYSTEM and a.currency = :currency")
     Optional<UUID> findSystemAccountId(String currency);
+
+    /**
+     * Only the owner, not the entity: an authorization check before {@link AccountLocker#lock} must not put the
+     * account into the persistence context, or the lock would return that stale copy.
+     */
+    @Query("select a.ownerId from Account a where a.id = :id")
+    Optional<String> findOwnerId(UUID id);
 }

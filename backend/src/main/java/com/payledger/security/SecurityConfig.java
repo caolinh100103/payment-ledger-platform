@@ -2,6 +2,9 @@ package com.payledger.security;
 
 import com.payledger.security.apikey.ApiKeyAuthenticationFilter;
 import com.payledger.security.apikey.ApiKeys;
+import com.payledger.security.ratelimit.RateLimitFilter;
+import com.payledger.security.ratelimit.RateLimitProperties;
+import com.payledger.security.ratelimit.RateLimiter;
 import com.payledger.security.token.AccessTokens;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +20,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -32,7 +36,7 @@ import java.util.List;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
-@EnableConfigurationProperties(SecurityProperties.class)
+@EnableConfigurationProperties({SecurityProperties.class, RateLimitProperties.class})
 class SecurityConfig implements WebMvcConfigurer {
 
     private final CurrentActor currentActor;
@@ -44,7 +48,8 @@ class SecurityConfig implements WebMvcConfigurer {
     }
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblemHandler problems, ApiKeys apiKeys)
+    SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblemHandler problems, ProblemWriter problemWriter,
+                                    ApiKeys apiKeys, RateLimiter rateLimiter, RateLimitProperties rateLimits)
             throws Exception {
         http
                 // CSRF forges requests that ride on credentials the browser attaches by itself (cookies). A bearer
@@ -65,7 +70,8 @@ class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
                 // Machine clients send X-API-Key; people send an access token as Authorization: Bearer.
-                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeys, problems), BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeys, problems),
+                        BearerTokenAuthenticationFilter.class)
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
                         // RFC 9728: /.well-known/oauth-protected-resource tells a client which issuer's tokens
@@ -78,6 +84,11 @@ class SecurityConfig implements WebMvcConfigurer {
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(problems)
                         .accessDeniedHandler(problems));
+        if (rateLimits.enabled()) {
+            // After authentication, so the limit applies per user or per key; before authorization.
+            http.addFilterBefore(new RateLimitFilter(rateLimiter, rateLimits, currentActor, problemWriter),
+                    AuthorizationFilter.class);
+        }
         return http.build();
     }
 

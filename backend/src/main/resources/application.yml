@@ -17,6 +17,10 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:16379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
     producer:
@@ -53,6 +57,10 @@ management:
     health:
       probes:
         enabled: true
+  health:
+    redis:
+      # Redis only backs the rate limiter, which fails open: it being down must not mark the service unhealthy.
+      enabled: false
   metrics:
     tags:
       application: ${spring.application.name}
@@ -84,6 +92,25 @@ payledger:
       # Created at startup only if no ADMIN exists and a password is set (at least 15 characters).
       username: ${PAYLEDGER_ADMIN_USERNAME:admin}
       password: ${PAYLEDGER_ADMIN_PASSWORD:}
+  rate-limit:
+    enabled: true
+    # Stripe's rule: a broken limiter must not break the API. A Redis command slower than this lets the request in,
+    # and Redis is then left alone for the cooldown.
+    redis-timeout: 200ms
+    fail-open-cooldown: 5s
+    policies:
+      # Token buckets: up to capacity requests at once, refilled at capacity per period.
+      user:
+        capacity: 120
+        period: 1m
+      api-key:
+        # A bank sends webhooks in bursts, e.g. after a settlement batch.
+        capacity: 600
+        period: 1m
+      anonymous:
+        # Per IP: sign-in, sign-up and refresh. Slows credential stuffing; lockout stops guessing one password.
+        capacity: 20
+        period: 1m
   kafka:
     topics:
       transfers:

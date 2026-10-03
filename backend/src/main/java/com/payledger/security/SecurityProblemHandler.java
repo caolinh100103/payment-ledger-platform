@@ -4,9 +4,6 @@ import com.payledger.security.apikey.ApiKeyAuthenticationFilter.InvalidApiKeyExc
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ProblemDetail;
-import org.springframework.http.converter.json.ProblemDetailJacksonMixin;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
@@ -15,7 +12,6 @@ import org.springframework.security.oauth2.server.resource.web.access.BearerToke
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 
@@ -29,11 +25,10 @@ class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHa
 
     private final BearerTokenAuthenticationEntryPoint bearerEntryPoint = new BearerTokenAuthenticationEntryPoint();
     private final BearerTokenAccessDeniedHandler bearerAccessDenied = new BearerTokenAccessDeniedHandler();
-    private final JsonMapper jsonMapper;
+    private final ProblemWriter problems;
 
-    SecurityProblemHandler(JsonMapper jsonMapper) {
-        // Same output as Spring MVC: problem "properties" are flattened into the top-level JSON object.
-        this.jsonMapper = jsonMapper.rebuild().addMixIn(ProblemDetail.class, ProblemDetailJacksonMixin.class).build();
+    SecurityProblemHandler(ProblemWriter problems) {
+        this.problems = problems;
     }
 
     @Override
@@ -41,11 +36,13 @@ class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHa
             throws IOException {
         bearerEntryPoint.commence(request, response, ex);
         if (ex instanceof InvalidBearerTokenException) {
-            write(response, HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "The access token is invalid or has expired");
+            problems.write(response, HttpStatus.UNAUTHORIZED, "INVALID_TOKEN",
+                    "The access token is invalid or has expired");
         } else if (ex instanceof InvalidApiKeyException) {
-            write(response, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY", "The API key is invalid, expired or revoked");
+            problems.write(response, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY",
+                    "The API key is invalid, expired or revoked");
         } else {
-            write(response, HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
+            problems.write(response, HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
                     "This operation requires an access token");
         }
     }
@@ -54,14 +51,7 @@ class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHa
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException ex)
             throws IOException {
         bearerAccessDenied.handle(request, response, ex);
-        write(response, HttpStatus.FORBIDDEN, "ACCESS_DENIED", "You are not allowed to perform this operation");
-    }
-
-    private void write(HttpServletResponse response, HttpStatus status, String code, String detail) throws IOException {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
-        problem.setProperty("code", code);
-        response.setStatus(status.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        jsonMapper.writeValue(response.getOutputStream(), problem);
+        problems.write(response, HttpStatus.FORBIDDEN, "ACCESS_DENIED",
+                "You are not allowed to perform this operation");
     }
 }

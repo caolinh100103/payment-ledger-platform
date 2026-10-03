@@ -1,9 +1,22 @@
-name: CI
+name: Backend
 
+# Runs only when the services, or the OpenAPI copies their contract tests compare against, change. The frontend and
+# the infrastructure have their own workflows. (If these checks are made required in branch protection, a skipped
+# workflow stays pending: require them only together with a paths-aware gate.)
 on:
   push:
     branches: [main]
+    paths:
+      - backend/**
+      - services/**
+      - frontend/openapi/**
+      - .github/workflows/backend.yml
   pull_request:
+    paths:
+      - backend/**
+      - services/**
+      - frontend/openapi/**
+      - .github/workflows/backend.yml
 
 jobs:
   build:
@@ -43,23 +56,3 @@ jobs:
         with:
           name: surefire-reports-${{ matrix.name }}
           path: ${{ matrix.path }}/target/surefire-reports
-
-  observability:
-    name: alerts and dashboards
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # The same Prometheus image as infra/docker-compose.yml, for its promtool.
-      - name: Check the Prometheus config and alert rules
-        run: >
-          docker run --rm -v "$PWD/infra/prometheus:/etc/prometheus:ro" --entrypoint promtool
-          prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
-
-      - name: Unit-test the alert rules
-        run: >
-          docker run --rm -v "$PWD/infra/prometheus:/rules:ro" -w /rules --entrypoint promtool
-          prom/prometheus:v3.15.0 test rules alerts.test.yml
-
-      - name: Dashboards are valid JSON
-        run: for f in infra/grafana/dashboards/*.json; do python3 -m json.tool "$f" > /dev/null || exit 1; done

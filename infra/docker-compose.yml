@@ -146,6 +146,104 @@ services:
       - prometheus
       - jaeger
 
+  # ------------------------------------------------------------------------------------------------------------------
+  # The application itself, for a demo or a single-host deployment: docker compose --profile app up -d --build
+  # Without the profile, only the infrastructure starts and the services run from the IDE or with ./mvnw.
+  # Their ports are published on the host as in local development, so Prometheus scrapes them the same way.
+  # ------------------------------------------------------------------------------------------------------------------
+
+  core:
+    profiles: [app]
+    build: ../backend
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/payledger
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      PAYLEDGER_JWT_ISSUER: http://core:8080
+      # Creates the first ADMIN (15+ characters). Put it in infra/.env, which git ignores, never in the repository.
+      PAYLEDGER_ADMIN_PASSWORD: ${PAYLEDGER_ADMIN_PASSWORD:-}
+      # A private P-256 JWK; empty means a random key per start (sessions end when the container restarts).
+      PAYLEDGER_JWT_SIGNING_KEY: ${PAYLEDGER_JWT_SIGNING_KEY:-}
+      # The refresh cookie is Secure (HTTPS, or http://localhost). Set to false only to try the app over plain HTTP
+      # on another host.
+      PAYLEDGER_SECURE_COOKIE: ${PAYLEDGER_SECURE_COOKIE:-true}
+      # Behind nginx: the client address for sign-in rate limits comes from X-Forwarded-For.
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      # RATE_LIMIT_ENABLED=false only for load tests (loadtest/README.md), which send far more than a person would.
+      PAYLEDGER_RATELIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      # Database connections; each money movement holds one while it waits for its account locks (loadtest/README.md).
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${DB_POOL_SIZE:-10}
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+    ports:
+      - "${CORE_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      # The JRE image has no curl: ask the readiness probe over bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  audit:
+    profiles: [app]
+    build: ../services/audit-service
+    environment:
+      AUDIT_DB_URL: jdbc:postgresql://audit-postgres:5432/audit
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      PAYLEDGER_JWKS_URI: http://core:8080/.well-known/jwks.json
+      PAYLEDGER_JWT_ISSUER: http://core:8080
+    ports:
+      - "${AUDIT_PORT:-8082}:8082"
+    depends_on:
+      audit-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  notification:
+    profiles: [app]
+    build: ../services/notification-service
+    environment:
+      NOTIFICATION_DB_URL: jdbc:postgresql://notification-postgres:5432/notification
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      PAYLEDGER_JWKS_URI: http://core:8080/.well-known/jwks.json
+      PAYLEDGER_JWT_ISSUER: http://core:8080
+    ports:
+      - "${NOTIFICATION_PORT:-8083}:8083"
+    depends_on:
+      notification-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # The web app and the reverse proxy in front of the three services (frontend/nginx.conf).
+  web:
+    profiles: [app]
+    build:
+      context: ../frontend
+      args:
+        VITE_DEMO_CREDENTIALS: ${VITE_DEMO_CREDENTIALS:-}
+    ports:
+      - "${WEB_PORT:-8088}:8080"
+    depends_on:
+      core:
+        condition: service_healthy
+      audit:
+        condition: service_started
+      notification:
+        condition: service_started
+
 volumes:
   postgres-data:
   audit-postgres-data:

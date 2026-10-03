@@ -56,6 +56,7 @@ A transfer's events reach consumers in order because three links each keep it:
 | Kafka down or unreachable | Sends time out (`max.block.ms` 5 s, `delivery.timeout.ms` 10 s). Rows stay pending with `attempts` + `last_error`. The API keeps accepting transfers. When Kafka is back, everything is published. |
 | One event can never be published (e.g. invalid topic) | Only that aggregate is held back. Other transfers keep flowing. `attempts` grows, which is the alert signal (Phase 5). |
 | Relay crashes after Kafka acknowledged but before the commit | The rows are still pending and get published again. **Delivery is at-least-once**, so consumers deduplicate on the CloudEvents `id`. |
+| A send times out, but the broker did receive it (e.g. a frozen broker resumes) | The relay counts it as failed and sends it again, so Kafka holds the event twice. The idempotent producer cannot prevent this, because it gives up on a batch once `delivery.timeout.ms` expires. Order is unaffected: the copy still comes before the aggregate's next event. `KafkaOutageIntegrationTest` hits this case regularly. |
 | Several instances | They share the work through `SKIP LOCKED`. There is no leader election and no failover delay. |
 
 Published rows are kept for 7 days, for debugging and manual replay, and then deleted in batches. Pending

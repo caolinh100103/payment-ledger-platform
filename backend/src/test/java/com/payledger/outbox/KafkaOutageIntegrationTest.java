@@ -17,10 +17,10 @@ import org.testcontainers.kafka.KafkaContainer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -70,7 +70,10 @@ class KafkaOutageIntegrationTest extends ApiTestSupport {
 
         await().atMost(Duration.ofSeconds(60)).until(() -> pendingEvents(transferIds) == 0);
 
-        Map<String, List<String>> typesByTransfer = consumeEventsOf(Set.copyOf(transferIds));
+        // Every event reaches Kafka. Some may arrive twice: a send that timed out during the outage may still have
+        // reached the broker, and the relay sends it again (at-least-once). Consumers deduplicate on the event id,
+        // so this checks what a consumer sees after doing the same: each transfer's events, once, in order.
+        Map<String, List<String>> typesByTransfer = consumeDistinctEventsOf(Set.copyOf(transferIds));
         assertThat(typesByTransfer).hasSize(TRANSFERS);
         assertThat(typesByTransfer.values()).allSatisfy(types -> assertThat(types)
                 .containsExactly("com.payledger.transfer.created", "com.payledger.transfer.completed"));
@@ -95,8 +98,11 @@ class KafkaOutageIntegrationTest extends ApiTestSupport {
                 Long.class);
     }
 
-    /** Event types per transfer, in the order a consumer receives them. */
-    private Map<String, List<String>> consumeEventsOf(Set<String> transferIds) {
+    /**
+     * Event types per transfer, in the order a consumer receives them, skipping repeated event ids the way an
+     * idempotent consumer does. Waits until every event of every transfer has arrived at least once.
+     */
+    private Map<String, List<String>> consumeDistinctEventsOf(Set<String> transferIds) {
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
@@ -105,16 +111,18 @@ class KafkaOutageIntegrationTest extends ApiTestSupport {
                     .map(info -> new TopicPartition(TOPIC, info.partition())).toList();
             consumer.assign(partitions);
             consumer.seekToBeginning(partitions);
+            Set<String> seenEventIds = new HashSet<>();
             Map<String, List<String>> types = new HashMap<>();
-            List<ConsumerRecord<String, String>> received = new ArrayList<>();
             await().atMost(Duration.ofSeconds(30)).until(() -> {
-                consumer.poll(Duration.ofMillis(200)).forEach(received::add);
-                return received.stream().filter(r -> transferIds.contains(r.key())).count() >= 2L * transferIds.size();
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(200))) {
+                    if (transferIds.contains(record.key()) && seenEventIds.add(JsonPath.read(record.value(), "$.id"))) {
+                        types.computeIfAbsent(record.key(), k -> new ArrayList<>())
+                                .add(JsonPath.read(record.value(), "$.type"));
+                    }
+                }
+                return seenEventIds.size() == 2 * transferIds.size();
             });
-            received.stream().filter(r -> transferIds.contains(r.key())).forEach(r -> types
-                    .computeIfAbsent(r.key(), k -> new ArrayList<>())
-                    .add(JsonPath.read(r.value(), "$.type")));
-            return types.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            return types;
         }
     }
 }

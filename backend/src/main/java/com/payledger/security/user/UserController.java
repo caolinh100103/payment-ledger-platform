@@ -36,8 +36,8 @@ class UserController {
     /** Creates a user with any role, typically a staff member. Customers sign up themselves. */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    ResponseEntity<UserResponse> create(@Valid @RequestBody CreateUserRequest request) {
-        UserAccount user = userService.create(request.username(), request.password(), request.role());
+    ResponseEntity<UserResponse> create(@Valid @RequestBody CreateUserRequest request, Actor actor) {
+        UserAccount user = userService.create(request.username(), request.password(), request.role(), actor);
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(user.getId()).toUri();
         return ResponseEntity.created(location).body(UserResponse.from(user));
@@ -58,8 +58,8 @@ class UserController {
     /** Lifts a sign-in lockout early, e.g. once the call centre has identified the customer. */
     @PostMapping("/{id}/unlock")
     @PreAuthorize("hasRole('OPERATOR')")
-    UserResponse unlock(@PathVariable UUID id) {
-        return UserResponse.from(userService.unlock(id));
+    UserResponse unlock(@PathVariable UUID id, Actor actor) {
+        return UserResponse.from(userService.unlock(id, actor));
     }
 
     record CreateUserRequest(

@@ -59,8 +59,8 @@ class ApiKeyController {
 
     @PostMapping("/{id}/revoke")
     @PreAuthorize("hasRole('ADMIN')")
-    ApiKey revoke(@PathVariable UUID id) {
-        return apiKeys.revoke(id);
+    ApiKey revoke(@PathVariable UUID id, Actor actor) {
+        return apiKeys.revoke(id, actor);
     }
 
     /** @param expiresAt optional; PCI DSS asks for credentials of system accounts to be rotated periodically */

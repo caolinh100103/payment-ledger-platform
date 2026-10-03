@@ -46,4 +46,5 @@ payledger:
       issuer: ${PAYLEDGER_JWT_ISSUER:http://localhost:8080}
       audience: payledger-api
   audit:
-    topic: payledger.transfers
+    # Money movements, account lifecycle, and security events (sign-ins, lockouts, sessions, users, API keys).
+    topics: payledger.transfers,payledger.accounts,payledger.security

@@ -3,6 +3,8 @@ package com.payledger.security.apikey;
 import com.payledger.common.error.ResourceNotFoundException;
 import com.payledger.security.Actor;
 import com.payledger.security.Secrets;
+import com.payledger.security.SecurityEvents;
+import com.payledger.security.SecurityEvents.ApiKeyData;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -36,9 +38,11 @@ public class ApiKeys {
             instant(rs.getTimestamp("last_used_at")));
 
     private final JdbcTemplate jdbc;
+    private final SecurityEvents events;
 
-    ApiKeys(JdbcTemplate jdbc) {
+    ApiKeys(JdbcTemplate jdbc, SecurityEvents events) {
         this.jdbc = jdbc;
+        this.events = events;
     }
 
     /** A key as listed: everything but the secret. */
@@ -59,7 +63,9 @@ public class ApiKeys {
                 VALUES (?, ?, ?, ?, ?, ?, now(), ?)
                 """, id, name, ApiKeyFormat.displayPrefix(key), Secrets.sha256(key), formatScopes(scopes),
                 createdBy.name(), expiresAt == null ? null : Timestamp.from(expiresAt));
-        return new CreatedApiKey(get(id), key);
+        ApiKey created = get(id);
+        events.apiKey(SecurityEvents.API_KEY_CREATED, data(created), createdBy.name());
+        return new CreatedApiKey(created, key);
     }
 
     @Transactional(readOnly = true)
@@ -75,9 +81,13 @@ public class ApiKeys {
 
     /** Takes effect on the next request; revoking twice keeps the first revocation time. */
     @Transactional
-    public ApiKey revoke(UUID id) {
-        jdbc.update("UPDATE api_keys SET revoked_at = now() WHERE id = ? AND revoked_at IS NULL", id);
-        return get(id);
+    public ApiKey revoke(UUID id, Actor revokedBy) {
+        int revoked = jdbc.update("UPDATE api_keys SET revoked_at = now() WHERE id = ? AND revoked_at IS NULL", id);
+        ApiKey apiKey = get(id);
+        if (revoked == 1) {
+            events.apiKey(SecurityEvents.API_KEY_REVOKED, data(apiKey), revokedBy.name());
+        }
+        return apiKey;
     }
 
     /** Empty for a malformed, unknown, revoked or expired key. */
@@ -96,6 +106,11 @@ public class ApiKeys {
                 WHERE id = ? AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')
                 """, authentication.getKeyId()));
         return found;
+    }
+
+    private static ApiKeyData data(ApiKey apiKey) {
+        return new ApiKeyData(apiKey.id(), apiKey.name(), apiKey.prefix(),
+                apiKey.scopes().stream().map(ApiKeyScope::value).collect(Collectors.toSet()), apiKey.expiresAt());
     }
 
     private static String formatScopes(Set<ApiKeyScope> scopes) {

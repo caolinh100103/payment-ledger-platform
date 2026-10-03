@@ -1,6 +1,7 @@
 package com.payledger.security.user;
 
 import com.payledger.common.error.BusinessRuleViolationException;
+import com.payledger.security.Actor;
 import com.payledger.security.Role;
 import com.payledger.security.SecurityProperties;
 import org.slf4j.Logger;
@@ -33,7 +34,7 @@ class BootstrapAdmin implements ApplicationRunner {
             return;
         }
         try {
-            userService.create(properties.username(), properties.password(), Role.ADMIN);
+            userService.create(properties.username(), properties.password(), Role.ADMIN, Actor.SYSTEM);
             log.info("Created bootstrap admin '{}'", properties.username());
         } catch (BusinessRuleViolationException e) {
             // Another instance won the race, or the username is used by a non-admin; either way nothing to do.

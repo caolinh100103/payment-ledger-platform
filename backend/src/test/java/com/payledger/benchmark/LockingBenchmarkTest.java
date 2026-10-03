@@ -186,7 +186,7 @@ class LockingBenchmarkTest {
     private List<UUID> fundedAccounts(int count) {
         List<UUID> ids = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            UUID id = accountService.open(OWNER.id(), "VND").getId();
+            UUID id = accountService.open(OWNER, "VND").getId();
             transfers.deposit(Actor.SYSTEM, id, 1_000_000_000L, "VND", null);
             ids.add(id);
         }

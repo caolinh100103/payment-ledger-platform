@@ -112,10 +112,10 @@ payledger:
         capacity: 20
         period: 1m
   kafka:
+    # For payledger.transfers, payledger.accounts and payledger.security.
     topics:
-      transfers:
-        partitions: 3
-        replicas: ${KAFKA_REPLICAS:1}
+      partitions: 3
+      replicas: ${KAFKA_REPLICAS:1}
   outbox:
     relay:
       # Disabled only in tests that drive the relay by hand.

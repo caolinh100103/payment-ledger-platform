@@ -3,6 +3,7 @@ package com.payledger.transfer;
 import com.payledger.account.Account;
 import com.payledger.account.AccountLocker.LockedPair;
 import com.payledger.outbox.CloudEvent;
+import com.payledger.outbox.EventTopics;
 import com.payledger.outbox.Outbox;
 import com.payledger.transfer.TransferEventData.AccountRef;
 import org.springframework.stereotype.Component;
@@ -21,7 +22,7 @@ import org.springframework.stereotype.Component;
 @Component
 class TransferEvents {
 
-    static final String TOPIC = "payledger.transfers";
+    static final String TOPIC = EventTopics.TRANSFERS;
     static final String AGGREGATE_TYPE = "transfer";
     static final String SOURCE = "/payledger/core";
     static final int SCHEMA_VERSION = 1;

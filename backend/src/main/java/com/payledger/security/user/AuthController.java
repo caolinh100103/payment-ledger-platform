@@ -1,5 +1,6 @@
 package com.payledger.security.user;
 
+import com.payledger.security.Actor;
 import com.payledger.security.AuthenticationFailedException;
 import com.payledger.security.Role;
 import com.payledger.security.token.AccessTokens;
@@ -13,6 +14,7 @@ import com.payledger.security.token.Sessions.Started;
 import com.payledger.security.user.LoginService.Locked;
 import com.payledger.security.user.LoginService.Rejected;
 import com.payledger.security.user.LoginService.Succeeded;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -53,15 +55,16 @@ class AuthController {
     @PostMapping("/signup")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("permitAll()")
-    UserController.UserResponse signup(@Valid @RequestBody SignupRequest request) {
-        return UserController.UserResponse.from(userService.create(request.username(), request.password(), Role.CUSTOMER));
+    UserController.UserResponse signup(@Valid @RequestBody SignupRequest request, Actor actor) {
+        return UserController.UserResponse.from(
+                userService.create(request.username(), request.password(), Role.CUSTOMER, actor));
     }
 
     /** 401 {@code INVALID_CREDENTIALS} for a wrong password and an unknown username alike. */
     @PostMapping("/login")
     @PreAuthorize("permitAll()")
-    TokenResponse login(@Valid @RequestBody LoginRequest request) {
-        return switch (loginService.login(request.username(), request.password())) {
+    TokenResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        return switch (loginService.login(request.username(), request.password(), http.getRemoteAddr())) {
             case Succeeded succeeded -> {
                 Started session = sessions.start(succeeded.user().getId());
                 yield tokens(succeeded.user(), session.sessionId(), session.refreshToken());

@@ -48,6 +48,16 @@ public class TestcontainersConfiguration {
         return TopicBuilder.name("payledger.transfers").partitions(3).replicas(1).build();
     }
 
+    @Bean
+    NewTopic accountsTopic() {
+        return TopicBuilder.name("payledger.accounts").partitions(3).replicas(1).build();
+    }
+
+    @Bean
+    NewTopic securityTopic() {
+        return TopicBuilder.name("payledger.security").partitions(3).replicas(1).build();
+    }
+
     /** Plays the core service's JWK Set endpoint. */
     @Bean(destroyMethod = "close")
     TestJwtIssuer testJwtIssuer() throws Exception {

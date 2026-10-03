@@ -38,7 +38,7 @@ public class AccountController {
     @PostMapping
     @PreAuthorize("hasRole('CUSTOMER')")
     public ResponseEntity<AccountResponse> open(@Valid @RequestBody OpenAccountRequest request, Actor actor) {
-        Account account = accountService.open(actor.id(), request.currency());
+        Account account = accountService.open(actor, request.currency());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(account.getId()).toUri();
         return ResponseEntity.created(location).body(AccountResponse.from(account));

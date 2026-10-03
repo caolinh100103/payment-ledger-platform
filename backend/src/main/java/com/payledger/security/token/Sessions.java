@@ -1,6 +1,9 @@
 package com.payledger.security.token;
 
+import com.payledger.security.Actor;
 import com.payledger.security.Secrets;
+import com.payledger.security.SecurityEvents;
+import com.payledger.security.SecurityEvents.UserData;
 import com.payledger.security.SecurityProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -43,11 +46,13 @@ public class Sessions {
     }
 
     private final JdbcTemplate jdbc;
+    private final SecurityEvents events;
     private final Duration tokenTtl;
     private final Duration sessionTtl;
 
-    Sessions(JdbcTemplate jdbc, SecurityProperties properties) {
+    Sessions(JdbcTemplate jdbc, SecurityEvents events, SecurityProperties properties) {
         this.jdbc = jdbc;
+        this.events = events;
         this.tokenTtl = properties.refresh().tokenTtl();
         this.sessionTtl = properties.refresh().sessionTtl();
     }
@@ -93,13 +98,21 @@ public class Sessions {
         return new Refreshed(user.getFirst(), sessionId, issue(sessionId));
     }
 
-    /** Ends the session of {@code token}, whatever state the token is in (RFC 7009: no error for a bad token). */
+    /**
+     * Ends the session of {@code token}, whatever state the token is in (RFC 7009: no error for a bad token). Holding
+     * the refresh token proves who owns the session, so the sign-out is attributed to that user.
+     */
     @Transactional
     public void revoke(String token) {
-        jdbc.update("""
+        jdbc.query("""
                 UPDATE auth_sessions SET revoked_at = now(), revoke_reason = 'LOGOUT'
                 WHERE revoked_at IS NULL AND id = (SELECT session_id FROM refresh_tokens WHERE token_hash = ?)
-                """, Secrets.sha256(token));
+                RETURNING id, user_id
+                """, (rs, row) -> {
+            UUID userId = rs.getObject("user_id", UUID.class);
+            revoked(userId, rs.getObject("id", UUID.class), "LOGOUT", "user:" + userId);
+            return null;
+        }, Secrets.sha256(token));
     }
 
     /** Deletes sessions past their absolute lifetime, with their tokens. Small batches keep each DELETE short. */
@@ -118,11 +131,22 @@ public class Sessions {
             return new Invalid();
         }
         UUID sessionId = used.getFirst();
-        jdbc.update("""
+        // The platform ends the session on its own decision: a likely stolen token.
+        jdbc.query("""
                 UPDATE auth_sessions SET revoked_at = now(), revoke_reason = 'REFRESH_TOKEN_REUSE'
                 WHERE id = ? AND revoked_at IS NULL
-                """, sessionId);
+                RETURNING user_id
+                """, (rs, row) -> {
+            revoked(rs.getObject("user_id", UUID.class), sessionId, "REFRESH_TOKEN_REUSE", Actor.SYSTEM.name());
+            return null;
+        }, sessionId);
         return new Reused(sessionId);
+    }
+
+    private void revoked(UUID userId, UUID sessionId, String reason, String actor) {
+        String username = jdbc.queryForObject("SELECT username FROM users WHERE id = ?", String.class, userId);
+        events.user(SecurityEvents.SESSION_REVOKED, new UserData(userId, username, null, null, null, null, sessionId,
+                reason), actor);
     }
 
     // The new token never outlives its session.

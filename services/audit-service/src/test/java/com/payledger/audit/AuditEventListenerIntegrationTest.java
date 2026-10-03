@@ -36,6 +36,25 @@ class AuditEventListenerIntegrationTest {
     @Autowired
     TestJwtIssuer tokens;
 
+    /** Who froze an account, and who failed to sign in, go into the same chain as the money movements. */
+    @Test
+    void recordsAccountAndSecurityEventsInTheSameChain() throws Exception {
+        String account = UUID.randomUUID().toString();
+        String user = UUID.randomUUID().toString();
+
+        kafka.send("payledger.accounts", account, AuditTestEvents.cloudEvent(UUID.randomUUID(),
+                "com.payledger.account.frozen", account, "user:operator-1")).get();
+        kafka.send("payledger.security", user, AuditTestEvents.cloudEvent(UUID.randomUUID(),
+                "com.payledger.user.sign_in_failed", user, "anonymous")).get();
+
+        await().atMost(Duration.ofSeconds(30)).until(() -> auditLog.findByResource(account, 10).size() == 1
+                && auditLog.findByResource(user, 10).size() == 1);
+        assertThat(auditLog.findByResource(account, 10).getFirst().event().actor()).isEqualTo("user:operator-1");
+        assertThat(auditLog.findByResource(user, 10).getFirst().event().action())
+                .isEqualTo("com.payledger.user.sign_in_failed");
+        assertThat(auditLog.verify().valid()).isTrue();
+    }
+
     @Test
     void recordsEachEventOfATransfer() throws Exception {
         String transfer = UUID.randomUUID().toString();

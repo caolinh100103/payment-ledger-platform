@@ -24,18 +24,23 @@ public class AccountService {
     static final Set<String> SUPPORTED_CURRENCIES = Set.of("VND", "USD", "EUR");
 
     private final AccountRepository accounts;
+    private final AccountEvents events;
 
-    public AccountService(AccountRepository accounts) {
+    AccountService(AccountRepository accounts, AccountEvents events) {
         this.accounts = accounts;
+        this.events = events;
     }
 
+    /** Opens an account owned by {@code owner}, the signed-in customer. */
     @Transactional
-    public Account open(String ownerId, String currency) {
+    public Account open(Actor owner, String currency) {
         if (!SUPPORTED_CURRENCIES.contains(currency)) {
             throw new BusinessRuleViolationException("UNSUPPORTED_CURRENCY",
                     "Currency " + currency + " is not supported; expected one of " + SUPPORTED_CURRENCIES);
         }
-        return accounts.save(Account.open(ownerId, currency));
+        Account account = accounts.save(Account.open(owner.id(), currency));
+        events.record(AccountEvents.OPENED, account, owner);
+        return account;
     }
 
     @Transactional(readOnly = true)
@@ -59,29 +64,31 @@ public class AccountService {
 
     @Transactional
     public Account freeze(Actor actor, UUID id) {
-        return transition(actor, id, Account::freeze);
+        return transition(actor, id, Account::freeze, AccountEvents.FROZEN);
     }
 
     @Transactional
     public Account unfreeze(Actor actor, UUID id) {
-        return transition(actor, id, Account::unfreeze);
+        return transition(actor, id, Account::unfreeze, AccountEvents.UNFROZEN);
     }
 
     /** By the owner, or by an operator on the customer's behalf. */
     @Transactional
     public Account close(Actor actor, UUID id) {
-        return transition(actor, id, Account::close);
+        return transition(actor, id, Account::close, AccountEvents.CLOSED);
     }
 
     private static boolean canSee(Actor actor, String ownerId) {
         return actor.hasRole(Role.OPERATOR) || (actor.isUser() && actor.id().equals(ownerId));
     }
 
-    private Account transition(Actor actor, UUID id, Consumer<Account> action) {
+    private Account transition(Actor actor, UUID id, Consumer<Account> action, String eventType) {
         Account account = get(actor, id);
         action.accept(account);
         // saveAndFlush so the @Version check runs inside this transaction and a concurrent
         // status change surfaces as an optimistic-lock conflict instead of a lost update.
-        return accounts.saveAndFlush(account);
+        Account saved = accounts.saveAndFlush(account);
+        events.record(eventType, saved, actor);
+        return saved;
     }
 }

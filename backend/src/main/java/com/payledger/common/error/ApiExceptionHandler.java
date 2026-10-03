@@ -2,6 +2,7 @@ package com.payledger.common.error;
 
 import com.payledger.common.idempotency.IdempotencyException;
 import com.payledger.security.AuthenticationFailedException;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
@@ -12,12 +13,25 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import java.sql.SQLException;
+
 /**
  * Renders all errors as RFC 9457 problem details. Every problem carries a {@code code}
  * property so clients can branch on it without parsing messages.
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    /** PostgreSQL {@code lock_not_available}: {@code lock_timeout} expired. */
+    private static final String LOCK_NOT_AVAILABLE = "55P03";
+    /** PostgreSQL {@code deadlock_detected}. */
+    private static final String DEADLOCK_DETECTED = "40P01";
+
+    private final MeterRegistry meters;
+
+    public ApiExceptionHandler(MeterRegistry meters) {
+        this.meters = meters;
+    }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     ProblemDetail handleNotFound(ResourceNotFoundException ex) {
@@ -61,9 +75,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
      * A row lock could not be acquired within {@code lock_timeout} (or, should lock ordering ever be broken,
      * PostgreSQL aborted a deadlock). Nothing was committed, so the client can safely retry the same request
      * with the same idempotency key.
+     *
+     * <p>Counted in {@code payledger_lock_failures_total{reason}}. Timeouts mean contention; a deadlock means the lock
+     * ordering of ADR 0004 was broken somewhere, and should never be seen.
      */
     @ExceptionHandler(PessimisticLockingFailureException.class)
     ResponseEntity<ProblemDetail> handleLockTimeout(PessimisticLockingFailureException ex) {
+        meters.counter("payledger.lock.failures", "reason", lockFailureReason(ex)).increment();
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
                 "An account involved is busy with another operation; retry shortly");
         problem.setProperty("code", "LOCK_TIMEOUT");
@@ -78,5 +96,18 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
                 "The resource was modified concurrently; reload it and retry");
         problem.setProperty("code", "CONCURRENT_MODIFICATION");
         return problem;
+    }
+
+    private static String lockFailureReason(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sql) {
+                return switch (String.valueOf(sql.getSQLState())) {
+                    case LOCK_NOT_AVAILABLE -> "lock_timeout";
+                    case DEADLOCK_DETECTED -> "deadlock";
+                    default -> "other";
+                };
+            }
+        }
+        return "other";
     }
 }

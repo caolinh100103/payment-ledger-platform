@@ -29,14 +29,16 @@ public class TransferService {
     private final AccountLocker locker;
     private final LedgerService ledger;
     private final TransferEvents events;
+    private final TransferMetrics metrics;
 
     public TransferService(TransferRepository transfers, AccountRepository accounts, AccountLocker locker,
-                           LedgerService ledger, TransferEvents events) {
+                           LedgerService ledger, TransferEvents events, TransferMetrics metrics) {
         this.transfers = transfers;
         this.accounts = accounts;
         this.locker = locker;
         this.ledger = ledger;
         this.events = events;
+        this.metrics = metrics;
     }
 
     /**
@@ -124,6 +126,7 @@ public class TransferService {
     }
 
     private Executed execute(Transfer transfer) {
+        long start = System.nanoTime();
         LockedPair locked = locker.lock(transfer.getSourceAccountId(), transfer.getDestinationAccountId());
         events.created(transfer, locked);
 
@@ -132,14 +135,14 @@ public class TransferService {
             transfer.fail(rejection.get().code(), rejection.get().reason());
             transfers.save(transfer);
             events.failed(transfer, locked);
-            return new Executed(transfer, locked);
+        } else {
+            transfer.complete();
+            // Persist the transfer before its entries: they reference it by foreign key.
+            transfers.saveAndFlush(transfer);
+            ledger.post(transfer.getId(), locked.source(), locked.destination(), transfer.getAmount());
+            events.completed(transfer, locked);
         }
-
-        transfer.complete();
-        // Persist the transfer before its entries: they reference it by foreign key.
-        transfers.saveAndFlush(transfer);
-        ledger.post(transfer.getId(), locked.source(), locked.destination(), transfer.getAmount());
-        events.completed(transfer, locked);
+        metrics.onCommit(transfer, start);
         return new Executed(transfer, locked);
     }
 

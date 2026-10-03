@@ -4,6 +4,7 @@ import com.payledger.common.idempotency.IdempotencyStore.Claimed;
 import com.payledger.common.idempotency.IdempotencyStore.ClaimResult;
 import com.payledger.common.idempotency.IdempotencyStore.Existing;
 import com.payledger.security.CurrentActor;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.servlet.HandlerMapping;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -45,6 +47,11 @@ import java.util.regex.Pattern;
  * never leave a committed transfer without its stored response (which would let a retry execute it twice).
  * Only outcomes that left a trace (a COMPLETED or FAILED transfer) are stored. An exception means nothing
  * was committed, so the key is released and the client may retry with it.
+ *
+ * <p>{@code payledger_idempotency_requests_total{uri, outcome}} counts each outcome: {@code executed},
+ * {@code released} (failed, key freed), and the three kinds of repeated key: {@code replayed}, {@code key_reused}
+ * and {@code in_progress}. Replays are how retries after a timeout and double-clicks show up; a burst of
+ * {@code key_reused} usually means a client bug that generates keys wrongly.
  */
 @Component
 public class IdempotencyHandler {
@@ -61,9 +68,10 @@ public class IdempotencyHandler {
     private final TransactionTemplate claimTx;
     private final Duration lease;
     private final Duration retention;
+    private final MeterRegistry meters;
 
     public IdempotencyHandler(IdempotencyStore store, CurrentActor currentActor, JsonMapper jsonMapper,
-                              PlatformTransactionManager txManager,
+                              PlatformTransactionManager txManager, MeterRegistry meters,
                               @Value("${payledger.idempotency.lease:30s}") Duration lease,
                               @Value("${payledger.idempotency.retention:24h}") Duration retention) {
         this.store = store;
@@ -75,6 +83,7 @@ public class IdempotencyHandler {
         this.claimTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.lease = lease;
         this.retention = retention;
+        this.meters = meters;
     }
 
     /**
@@ -89,14 +98,15 @@ public class IdempotencyHandler {
         String requestHash = fingerprint(request.getMethod(), request.getRequestURI(), requestBody);
 
         ClaimResult claim = claimTx.execute(status -> store.claim(scope, key, requestHash, lease, retention));
+        String uri = uriPattern(request);
         return switch (claim) {
-            case Existing existing -> replay(existing, requestHash);
-            case Claimed claimed -> executeClaimed(scope, key, claimed, operation);
+            case Existing existing -> replay(existing, requestHash, uri);
+            case Claimed claimed -> executeClaimed(scope, key, claimed, operation, uri);
         };
     }
 
     private ResponseEntity<String> executeClaimed(String scope, String key, Claimed claimed,
-                                                  Supplier<ResponseEntity<?>> operation) {
+                                                  Supplier<ResponseEntity<?>> operation, String uri) {
         try {
             StoredResponse response = operationTx.execute(status -> {
                 StoredResponse result = serialize(operation.get());
@@ -106,8 +116,10 @@ public class IdempotencyHandler {
                 }
                 return result;
             });
+            count(uri, "executed");
             return toHttp(response, false);
         } catch (RuntimeException ex) {
+            count(uri, "released");
             try {
                 claimTx.executeWithoutResult(status -> store.release(scope, key, claimed.token()));
             } catch (RuntimeException releaseFailure) {
@@ -118,15 +130,28 @@ public class IdempotencyHandler {
         }
     }
 
-    private ResponseEntity<String> replay(Existing existing, String requestHash) {
+    private ResponseEntity<String> replay(Existing existing, String requestHash, String uri) {
         if (!existing.requestHash().equals(requestHash)) {
+            count(uri, "key_reused");
             throw new IdempotencyException(HttpStatus.UNPROCESSABLE_CONTENT, "IDEMPOTENCY_KEY_REUSED",
                     "This Idempotency-Key was already used for a different request");
         }
         if (!existing.completed()) {
+            count(uri, "in_progress");
             throw inProgress();
         }
+        count(uri, "replayed");
         return toHttp(existing.response(), true);
+    }
+
+    private void count(String uri, String outcome) {
+        meters.counter("payledger.idempotency.requests", "uri", uri, "outcome", outcome).increment();
+    }
+
+    /** The route, e.g. {@code /api/v1/transfers/{id}/reversals}: bounded, unlike the path with its ids. */
+    private static String uriPattern(HttpServletRequest request) {
+        Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        return pattern == null ? "UNKNOWN" : pattern.toString();
     }
 
     private static IdempotencyException inProgress() {

@@ -1,5 +1,6 @@
 package com.payledger.security;
 
+import com.payledger.security.apikey.ApiKeyAuthentication;
 import org.springframework.core.MethodParameter;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -35,6 +36,7 @@ public class CurrentActor implements HandlerMethodArgumentResolver {
             case null -> Actor.SYSTEM;
             case AnonymousAuthenticationToken anonymous -> Actor.ANONYMOUS;
             case JwtAuthenticationToken jwt -> new Actor(Actor.Kind.USER, jwt.getName(), authoritiesOf(jwt));
+            case ApiKeyAuthentication apiKey -> new Actor(Actor.Kind.API_KEY, apiKey.getName(), authoritiesOf(apiKey));
             default -> throw new IllegalStateException("Unsupported authentication " + authentication.getClass());
         };
     }

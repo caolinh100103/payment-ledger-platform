@@ -3,9 +3,10 @@ package com.payledger.security;
 import java.util.Set;
 
 /**
- * Who is behind the current request. Controllers receive it as a method argument (see {@link CurrentActor}).
+ * Who is behind the current request: a person signed in with an access token, or a machine client with an API key.
+ * Controllers receive it as a method argument (see {@link CurrentActor}).
  *
- * @param id          the user id (the JWT subject) for a user; a fixed name otherwise
+ * @param id          the user id (the JWT subject) for a user, the key id for an API key; a fixed name otherwise
  * @param authorities everything granted, including roles implied by the hierarchy
  */
 public record Actor(Kind kind, String id, Set<String> authorities) {
@@ -16,7 +17,7 @@ public record Actor(Kind kind, String id, Set<String> authorities) {
     public static final Actor SYSTEM = new Actor(Kind.SYSTEM, "system", Set.of());
 
     public enum Kind {
-        USER, ANONYMOUS, SYSTEM
+        USER, API_KEY, ANONYMOUS, SYSTEM
     }
 
     public Actor {
@@ -27,6 +28,7 @@ public record Actor(Kind kind, String id, Set<String> authorities) {
     public String name() {
         return switch (kind) {
             case USER -> "user:" + id;
+            case API_KEY -> "apikey:" + id;
             case ANONYMOUS, SYSTEM -> id;
         };
     }

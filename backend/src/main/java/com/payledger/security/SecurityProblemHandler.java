@@ -1,5 +1,6 @@
 package com.payledger.security;
 
+import com.payledger.security.apikey.ApiKeyAuthenticationFilter.InvalidApiKeyException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
@@ -41,6 +42,8 @@ class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHa
         bearerEntryPoint.commence(request, response, ex);
         if (ex instanceof InvalidBearerTokenException) {
             write(response, HttpStatus.UNAUTHORIZED, "INVALID_TOKEN", "The access token is invalid or has expired");
+        } else if (ex instanceof InvalidApiKeyException) {
+            write(response, HttpStatus.UNAUTHORIZED, "INVALID_API_KEY", "The API key is invalid, expired or revoked");
         } else {
             write(response, HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED",
                     "This operation requires an access token");

@@ -1,5 +1,7 @@
 package com.payledger.security;
 
+import com.payledger.security.apikey.ApiKeyAuthenticationFilter;
+import com.payledger.security.apikey.ApiKeys;
 import com.payledger.security.token.AccessTokens;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +15,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -20,8 +23,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import java.util.List;
 
 /**
- * Stateless API security: every request carries its own credentials (a bearer access token), the server keeps no
- * HTTP session, and no cookie is ever read.
+ * Stateless API security: every request carries its own credentials (a bearer access token, or an API key for a
+ * machine client), the server keeps no HTTP session, and no cookie is ever read.
  *
  * <p>Two layers decide access. The filter chain below only separates public endpoints from the rest. The
  * {@code @PreAuthorize} rule on each controller method decides who may call it, next to the code it protects;
@@ -41,7 +44,8 @@ class SecurityConfig implements WebMvcConfigurer {
     }
 
     @Bean
-    SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblemHandler problems) throws Exception {
+    SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblemHandler problems, ApiKeys apiKeys)
+            throws Exception {
         http
                 // CSRF forges requests that ride on credentials the browser attaches by itself (cookies). A bearer
                 // token is only sent when the client's code adds it, so there is nothing to forge.
@@ -60,6 +64,8 @@ class SecurityConfig implements WebMvcConfigurer {
                         // Error dispatches render the original status (e.g. 404) instead of a misleading 401.
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
+                // Machine clients send X-API-Key; people send an access token as Authorization: Bearer.
+                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeys, problems), BearerTokenAuthenticationFilter.class)
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
                         // RFC 9728: /.well-known/oauth-protected-resource tells a client which issuer's tokens

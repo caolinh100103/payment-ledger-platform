@@ -2,6 +2,8 @@ package com.payledger.support;
 
 import com.jayway.jsonpath.JsonPath;
 import com.payledger.TestcontainersConfiguration;
+import com.payledger.security.Role;
+import com.payledger.security.token.AccessTokens;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -27,6 +29,14 @@ public abstract class ApiTestSupport {
 
     @Autowired
     protected JdbcTemplate jdbc;
+
+    @Autowired
+    protected AccessTokens accessTokens;
+
+    /** An Authorization header value for a new user with {@code role}. */
+    protected String bearer(Role role) {
+        return "Bearer " + accessTokens.issue(UUID.randomUUID(), role, UUID.randomUUID()).value();
+    }
 
     protected String openAccount(String currency) {
         return openAccount("owner-" + UUID.randomUUID(), currency);

@@ -1,0 +1,142 @@
+# Unit tests for alerts.yml: promtool test rules alerts.test.yml (CI runs it in the prom/prometheus image).
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: An old outbox backlog pages after two minutes; a young one never does
+    interval: 1m
+    input_series:
+      - series: 'payledger_outbox_oldest_pending_age_seconds{application="payledger-core", instance="core-1"}'
+        values: '0 5 30 61 120 180'
+      - series: 'payledger_outbox_oldest_pending_age_seconds{application="payledger-core", instance="core-2"}'
+        values: '0 5 30 61 120 180'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OutboxStalled
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: OutboxStalled
+        exp_alerts:
+          # One alert for the fleet, not one per instance: every instance reports the same backlog.
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: Events are not reaching Kafka
+              description: The oldest unpublished outbox event is 3m 0s old.
+              runbook: docs/runbook.md#outboxstalled
+
+  - name: A single deadlock pages at once
+    interval: 1m
+    input_series:
+      - series: 'payledger_lock_failures_total{application="payledger-core", reason="deadlock"}'
+        values: '0 0 1 1'
+      - series: 'payledger_lock_failures_total{application="payledger-core", reason="lock_timeout"}'
+        values: '0 1 2 3'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: DeadlockDetected
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: DeadlockDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: PostgreSQL aborted a deadlock between money movements
+              description: "The lock ordering of ADR 0004 is broken somewhere: a code change locks rows in another order."
+              runbook: docs/runbook.md#deadlockdetected
+      # A few lock timeouts are contention, not an incident.
+      - eval_time: 3m
+        alertname: AccountLockTimeouts
+        exp_alerts: []
+
+  - name: An event parked by the audit service is an audit gap
+    interval: 1m
+    input_series:
+      - series: 'payledger_events_dead_lettered_total{application="audit-service", topic="payledger.security"}'
+        values: '0 0 1'
+      - series: 'payledger_events_dead_lettered_total{application="notification-service", topic="payledger.transfers"}'
+        values: '0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: AuditGap
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              topic: payledger.security
+            exp_annotations:
+              summary: An event could not be recorded in the audit trail
+              description: 1 event(s) from payledger.security were parked on the audit dead-letter topic.
+              runbook: docs/runbook.md#auditgap
+      - eval_time: 2m
+        alertname: NotificationsDeadLettered
+        exp_alerts: []
+
+  - name: Lag on a main topic alerts; messages waiting out their retry back-off do not
+    interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="audit-service", topic="payledger.transfers", partition="0"}'
+        values: '800x10'
+      - series: 'kafka_consumergroup_lag{consumergroup="audit-service", topic="payledger.transfers", partition="1"}'
+        values: '700x10'
+      - series: 'kafka_consumergroup_lag{consumergroup="notification-service", topic="payledger.transfers-notification-retry-2", partition="0"}'
+        values: '5000x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: ConsumerLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              consumergroup: audit-service
+              topic: payledger.transfers
+            exp_annotations:
+              summary: audit-service is falling behind on payledger.transfers
+              description: 1500 messages are waiting to be consumed.
+              runbook: docs/runbook.md#consumerlaghigh
+
+  - name: Server errors on money movements page; business rejections do not
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{application="payledger-core", uri="/api/v1/transfers", status="201"}'
+        values: '0+90x10'
+      - series: 'http_server_requests_seconds_count{application="payledger-core", uri="/api/v1/transfers", status="422"}'
+        values: '0+100x10'
+      - series: 'http_server_requests_seconds_count{application="payledger-core", uri="/api/v1/transfers", status="503"}'
+        values: '0+20x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MoneyMovementErrors
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MoneyMovementErrors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: More than 5% of money movements fail with a server error
+              # 20 of 210 a minute: the 422 rejections count as requests, not as errors.
+              description: 9.524% of transfer and deposit requests returned 5xx over 5 minutes.
+              runbook: docs/runbook.md#moneymovementerrors
+
+  - name: A service that stops answering scrapes pages after a minute
+    interval: 1m
+    input_series:
+      - series: 'up{job="audit-service", instance="host.docker.internal:8082"}'
+        values: '1 0 0 0'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ServiceDown
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: audit-service
+              instance: host.docker.internal:8082
+            exp_annotations:
+              summary: audit-service is not answering Prometheus
+              description: host.docker.internal:8082 has failed every scrape for a minute.
+              runbook: docs/runbook.md#servicedown

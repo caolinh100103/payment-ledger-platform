@@ -1,5 +1,9 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
 
 scrape_configs:
   # The backend runs on the host during development (mvnw spring-boot:run).
@@ -17,3 +21,7 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8083"]
+
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]

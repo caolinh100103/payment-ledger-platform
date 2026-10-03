@@ -99,14 +99,37 @@ services:
       kafka:
         condition: service_healthy
 
+  # Consumer lag measured from the broker's committed offsets, not by the consumers themselves: a consumer that is
+  # down or stuck reports nothing, which is exactly when its lag matters.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    command: ["--kafka.server=kafka:19092"]
+    ports:
+      - "${KAFKA_EXPORTER_PORT:-9308}:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   prometheus:
     image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Keeps the trace ids attached to histogram samples, so a latency spike on a dashboard links to a trace.
+      - --enable-feature=exemplar-storage
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Traces from the three services (OTLP over HTTP on 4318), kept in memory; UI on 16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${OTLP_HTTP_PORT:-4318}:4318"
 
   grafana:
     image: grafana/grafana:13.2.3
@@ -117,9 +140,11 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+      - jaeger
 
 volumes:
   postgres-data:
